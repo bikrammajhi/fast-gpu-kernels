@@ -6,6 +6,7 @@ from rich.console import Console
 console = Console()
 
 ARCH         = ["-arch=sm_100", "-gencode", "arch=compute_100,code=sm_100"]
+ARCH_A100    = ["-arch=sm_80", "-gencode", "arch=compute_80,code=sm_80"]
 CUTLASS_ROOT = "/root/cutlass"
 
 INCLUDES = {
@@ -19,8 +20,15 @@ INCLUDES = {
 CXX17_FLAGS = ["-std=c++17"]
 
 
+def _detect_arch(src: str) -> list[str]:
+    if "A100" in src or "a100" in src:
+        return ARCH_A100
+    return ARCH
+
+
 def _nvcc(src: str, binary: str, includes: list[str], extra_flags: list[str]) -> None:
-    cmd = ["nvcc", "-O3", *includes, *ARCH, "-lcublas", *extra_flags, "-o", binary, src]
+    arch = _detect_arch(src)
+    cmd = ["nvcc", "-O3", *includes, *arch, "-lcublas", *extra_flags, "-o", binary, src]
     console.log(f"[dim]compile[/dim]  {src}")
     t0 = time.perf_counter()
     cc = subprocess.run(cmd, capture_output=True, text=True)
