@@ -30,7 +30,7 @@ image = (
 app = modal.App("gpulab", image=image)
 
 
-@app.function(gpu="A100-80GB", timeout=3600)
+@app.function(gpu="A100", timeout=3600)
 def run(task: str, params: dict, extra_flags: list[str] | None = None):
     import subprocess
     import sys

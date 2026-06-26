@@ -68,7 +68,7 @@ __global__ void matmul_v1_kern(
             for (int n = 0; n < NUM_MMA_N; ++n) {
                 const __nv_bfloat16* B_smem_ptr = B_smem_warp
                     + (n * MMA_N + (lane_id % 8)) * SMEM_STRIDE
-                    + (lane_id / 8) * MMA_K;
+                    + (lane_id / 8) * 8;
                 LDMATRIX_X2(B_regs[n], to_smem(B_smem_ptr));
             }
 
@@ -77,7 +77,7 @@ __global__ void matmul_v1_kern(
                 uint32_t A_regs[num_A_regs];
                 const __nv_bfloat16* A_smem_ptr = A_smem_warp
                     + (m * MMA_M + lane_id % 16) * SMEM_STRIDE
-                    + (lane_id / 16) * MMA_K;
+                    + (lane_id / 16) * 8;
                 LDMATRIX_X4(A_regs, to_smem(A_smem_ptr));
                 #pragma unroll
                 for (int n = 0; n < NUM_MMA_N; ++n)
@@ -101,7 +101,7 @@ __global__ void matmul_v1_kern(
             reinterpret_cast<__nv_bfloat162*>(C + (c_row + 0) * N + c_col)[0] = tmp;
             tmp.x = __float2bfloat16_rn(regs[2]);
             tmp.y = __float2bfloat16_rn(regs[3]);
-            reinterpret_cast<__nv_bfloat162*>(C + (c_row + 1) * N + c_col)[0] = tmp;
+            reinterpret_cast<__nv_bfloat162*>(C + (c_row + 8) * N + c_col)[0] = tmp;
         }
     }
 }

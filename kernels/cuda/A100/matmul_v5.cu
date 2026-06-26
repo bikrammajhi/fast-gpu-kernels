@@ -2,7 +2,7 @@
 #include "common.h"
 
 // =============================================================================
-// matmul_v2 — async cp (no padding, no swizzle)
+// matmul_v5 — cp.async + padding + threadblock swizzle + double buffering
 // =============================================================================
 
 template <
@@ -14,7 +14,7 @@ template <
     int SMEM_STRIDE
 >
 __launch_bounds__(NUM_WARP_M * NUM_WARP_N * WARP_SIZE)
-__global__ void matmul_v2_kern(
+__global__ void matmul_v5_kern(
     const __nv_bfloat16* __restrict__ A,
     const __nv_bfloat16* __restrict__ B,
     __nv_bfloat16* __restrict__ C,
@@ -58,13 +58,11 @@ __global__ void matmul_v2_kern(
 
     const int num_k_blocks = K / BLOCK_K;
 
-    // prologue: load first tile
     gmem2smem_async<CTA_SIZE, BLOCK_M, BLOCK_K, SMEM_STRIDE, false>(A, K, A_smem[0], tid);
     gmem2smem_async<CTA_SIZE, BLOCK_N, BLOCK_K, SMEM_STRIDE, false>(B, K, B_smem[0], tid);
     cp_async_wait_all();
     __syncthreads();
 
-    // main loop: overlap compute on buf[cur] with async load into buf[next]
     for (int i = 0; i < num_k_blocks - 1; ++i) {
         int cur = i & 1;
         int nxt = cur ^ 1;
@@ -73,13 +71,13 @@ __global__ void matmul_v2_kern(
         gmem2smem_async<CTA_SIZE, BLOCK_N, BLOCK_K, SMEM_STRIDE, false>(B + (i + 1) * BLOCK_K, K, B_smem[nxt], tid);
 
         for (int k = 0; k < BLOCK_K; k += MMA_K) {
-            const __nv_bfloat16* A_warp = A_smem[cur] + warp_m * WARP_M * SMEM_STRIDE + k;
-            const __nv_bfloat16* B_warp = B_smem[cur] + warp_n * WARP_N * SMEM_STRIDE + k;
+            const __nv_bfloat16* A_warp_base = A_smem[cur] + warp_m * WARP_M * SMEM_STRIDE + k;
+            const __nv_bfloat16* B_warp_base = B_smem[cur] + warp_n * WARP_N * SMEM_STRIDE + k;
 
             uint32_t B_regs[NUM_MMA_N][num_B_regs];
             #pragma unroll
             for (int n = 0; n < NUM_MMA_N; ++n) {
-                const __nv_bfloat16* B_ptr = B_warp
+                const __nv_bfloat16* B_ptr = B_warp_base
                     + (n * MMA_N + (lane_id % 8)) * SMEM_STRIDE
                     + (lane_id / 8) * 8;
                 LDMATRIX_X2(B_regs[n], to_smem(B_ptr));
@@ -88,7 +86,7 @@ __global__ void matmul_v2_kern(
             #pragma unroll
             for (int m = 0; m < NUM_MMA_M; ++m) {
                 uint32_t A_regs[num_A_regs];
-                const __nv_bfloat16* A_ptr = A_warp
+                const __nv_bfloat16* A_ptr = A_warp_base
                     + (m * MMA_M + lane_id % 16) * SMEM_STRIDE
                     + (lane_id / 16) * 8;
                 LDMATRIX_X4(A_regs, to_smem(A_ptr));
@@ -102,17 +100,16 @@ __global__ void matmul_v2_kern(
         __syncthreads();
     }
 
-    // epilogue: compute last tile
     {
         int cur = (num_k_blocks - 1) & 1;
         for (int k = 0; k < BLOCK_K; k += MMA_K) {
-            const __nv_bfloat16* A_warp = A_smem[cur] + warp_m * WARP_M * SMEM_STRIDE + k;
-            const __nv_bfloat16* B_warp = B_smem[cur] + warp_n * WARP_N * SMEM_STRIDE + k;
+            const __nv_bfloat16* A_warp_base = A_smem[cur] + warp_m * WARP_M * SMEM_STRIDE + k;
+            const __nv_bfloat16* B_warp_base = B_smem[cur] + warp_n * WARP_N * SMEM_STRIDE + k;
 
             uint32_t B_regs[NUM_MMA_N][num_B_regs];
             #pragma unroll
             for (int n = 0; n < NUM_MMA_N; ++n) {
-                const __nv_bfloat16* B_ptr = B_warp
+                const __nv_bfloat16* B_ptr = B_warp_base
                     + (n * MMA_N + (lane_id % 8)) * SMEM_STRIDE
                     + (lane_id / 8) * 8;
                 LDMATRIX_X2(B_regs[n], to_smem(B_ptr));
@@ -121,7 +118,7 @@ __global__ void matmul_v2_kern(
             #pragma unroll
             for (int m = 0; m < NUM_MMA_M; ++m) {
                 uint32_t A_regs[num_A_regs];
-                const __nv_bfloat16* A_ptr = A_warp
+                const __nv_bfloat16* A_ptr = A_warp_base
                     + (m * MMA_M + lane_id % 16) * SMEM_STRIDE
                     + (lane_id / 16) * 8;
                 LDMATRIX_X4(A_regs, to_smem(A_ptr));
@@ -149,7 +146,7 @@ __global__ void matmul_v2_kern(
     }
 }
 
-inline void matmul_v2_launch(const __nv_bfloat16* A, const __nv_bfloat16* B,
+inline void matmul_v5_launch(const __nv_bfloat16* A, const __nv_bfloat16* B,
                               __nv_bfloat16* C, int M, int N, int K)
 {
     constexpr int BLOCK_M = 128;
@@ -157,13 +154,13 @@ inline void matmul_v2_launch(const __nv_bfloat16* A, const __nv_bfloat16* B,
     constexpr int BLOCK_K = 64;
     constexpr int NUM_WARP_M = 2;
     constexpr int NUM_WARP_N = 2;
-    constexpr int SMEM_STRIDE = BLOCK_K; // no padding
+    constexpr int SMEM_STRIDE = BLOCK_K + 8;
 
     constexpr int smem_per_buf = (BLOCK_M + BLOCK_N) * SMEM_STRIDE;
     constexpr int smem_total = 2 * smem_per_buf * (int)sizeof(__nv_bfloat16);
 
     launch_safe(
-        matmul_v2_kern<BLOCK_M, BLOCK_N, BLOCK_K, NUM_WARP_M, NUM_WARP_N, SMEM_STRIDE>,
+        matmul_v5_kern<BLOCK_M, BLOCK_N, BLOCK_K, NUM_WARP_M, NUM_WARP_N, SMEM_STRIDE>,
         cdiv(M, BLOCK_M) * cdiv(N, BLOCK_N),
         NUM_WARP_M * NUM_WARP_N * WARP_SIZE,
         smem_total,

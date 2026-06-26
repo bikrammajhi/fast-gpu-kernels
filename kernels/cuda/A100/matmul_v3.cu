@@ -2,7 +2,7 @@
 #include "common.h"
 
 // =============================================================================
-// matmul_v2 — async cp (no padding, no swizzle)
+// matmul_v3 — async cp + padding + double buffering
 // =============================================================================
 
 template <
@@ -14,7 +14,7 @@ template <
     int SMEM_STRIDE
 >
 __launch_bounds__(NUM_WARP_M * NUM_WARP_N * WARP_SIZE)
-__global__ void matmul_v2_kern(
+__global__ void matmul_v3_kern(
     const __nv_bfloat16* __restrict__ A,
     const __nv_bfloat16* __restrict__ B,
     __nv_bfloat16* __restrict__ C,
@@ -102,7 +102,7 @@ __global__ void matmul_v2_kern(
         __syncthreads();
     }
 
-    // epilogue: compute last tile
+    // epilogue: compute last tile (already in smem)
     {
         int cur = (num_k_blocks - 1) & 1;
         for (int k = 0; k < BLOCK_K; k += MMA_K) {
@@ -149,7 +149,7 @@ __global__ void matmul_v2_kern(
     }
 }
 
-inline void matmul_v2_launch(const __nv_bfloat16* A, const __nv_bfloat16* B,
+inline void matmul_v3_launch(const __nv_bfloat16* A, const __nv_bfloat16* B,
                               __nv_bfloat16* C, int M, int N, int K)
 {
     constexpr int BLOCK_M = 128;
@@ -157,13 +157,13 @@ inline void matmul_v2_launch(const __nv_bfloat16* A, const __nv_bfloat16* B,
     constexpr int BLOCK_K = 64;
     constexpr int NUM_WARP_M = 2;
     constexpr int NUM_WARP_N = 2;
-    constexpr int SMEM_STRIDE = BLOCK_K; // no padding
+    constexpr int SMEM_STRIDE = BLOCK_K + 8;
 
     constexpr int smem_per_buf = (BLOCK_M + BLOCK_N) * SMEM_STRIDE;
     constexpr int smem_total = 2 * smem_per_buf * (int)sizeof(__nv_bfloat16);
 
     launch_safe(
-        matmul_v2_kern<BLOCK_M, BLOCK_N, BLOCK_K, NUM_WARP_M, NUM_WARP_N, SMEM_STRIDE>,
+        matmul_v3_kern<BLOCK_M, BLOCK_N, BLOCK_K, NUM_WARP_M, NUM_WARP_N, SMEM_STRIDE>,
         cdiv(M, BLOCK_M) * cdiv(N, BLOCK_N),
         NUM_WARP_M * NUM_WARP_N * WARP_SIZE,
         smem_total,
