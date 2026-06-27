@@ -9,36 +9,6 @@
 //   - Custom swizzle for bank-conflict-free shared memory access
 // =============================================================================
 
-__host__ __device__ inline void swizzle_triton_v9(int bid, int grid_m, int grid_n, int &bid_m, int &bid_n, int GROUP_M) {
-    if (GROUP_M == 0) {
-        bid_m = bid / grid_n;
-        bid_n = bid % grid_n;
-    } else {
-        const int group_size = GROUP_M * grid_n;
-        const int group_id = bid / group_size;
-        const int group_off_m = group_id * GROUP_M;
-        const int group_m = (grid_m - group_off_m) < GROUP_M ? (grid_m - group_off_m) : GROUP_M;
-        bid_m = group_off_m + ((bid % group_size) % group_m);
-        bid_n = (bid % group_size) / group_m;
-    }
-}
-
-template <int CTA_SIZE, int HEIGHT, int WIDTH>
-__device__ static void g2s_v9(
-    const __nv_bfloat16 *in, int in_stride, uint32_t out, int tid)
-{
-  constexpr int num_elems = 16 / sizeof(__nv_bfloat16);
-  constexpr int num_iters = (HEIGHT * WIDTH) / (CTA_SIZE * num_elems);
-  #pragma unroll
-  for (int iter = 0; iter < num_iters; iter++) {
-    const int idx = (iter * CTA_SIZE + tid) * num_elems;
-    const int row = idx / WIDTH;
-    const int col = idx % WIDTH;
-    uint32_t dst_addr = out + swizzle_better<WIDTH * sizeof(__nv_bfloat16)>(row, col / num_elems);
-    cp_async(dst_addr, in + row * in_stride + col);
-  }
-}
-
 // =============================================================================
 // Core kernel: interleaved ldmatrix + MMA
 // =============================================================================
@@ -73,7 +43,7 @@ __global__ void matmul_v9_kern(
     const int grid_m = cdiv(M, BLOCK_M);
     const int grid_n = cdiv(N, BLOCK_N);
     int bid_m, bid_n;
-    swizzle_triton_v9(bid, grid_m, grid_n, bid_m, bid_n, GROUP_M);
+    swizzle_block_idx_triton(bid, grid_m, grid_n, bid_m, bid_n, GROUP_M);
 
     const int off_m = bid_m * BLOCK_M;
     const int off_n = bid_n * BLOCK_N;
@@ -102,8 +72,8 @@ __global__ void matmul_v9_kern(
 
     auto load_AB = [&](int k_iter) {
         const int stage_id = k_iter % NUM_STAGES;
-        g2s_v9<CTA_SIZE, BLOCK_M, BLOCK_K>(A, K, A_shm_base + stage_id * AB_size, tid);
-        g2s_v9<CTA_SIZE, BLOCK_N, BLOCK_K>(B, K, B_shm_base + stage_id * AB_size, tid);
+        g2s_swizzled<CTA_SIZE, BLOCK_M, BLOCK_K>(A, K, A_shm_base + stage_id * AB_size, tid);
+        g2s_swizzled<CTA_SIZE, BLOCK_N, BLOCK_K>(B, K, B_shm_base + stage_id * AB_size, tid);
         A += BLOCK_K;
         B += BLOCK_K;
         cp_async_commit_group();
@@ -202,19 +172,7 @@ __global__ void matmul_v9_kern(
         compute_simple(k_iter);
     }
 
-    // Store results
-    #pragma unroll
-    for (int m = 0; m < NUM_MMA_M; m++)
-        #pragma unroll
-        for (int n = 0; n < NUM_MMA_N; n++) {
-            const int row = m * MMA_M + (lane_id / 4);
-            const int col = n * MMA_N + (lane_id % 4) * 2;
-            float *regs = acc[m][n];
-            reinterpret_cast<__nv_bfloat162*>(C + (row + 0) * N + col)[0] =
-                __float22bfloat162_rn({regs[0], regs[1]});
-            reinterpret_cast<__nv_bfloat162*>(C + (row + 8) * N + col)[0] =
-                __float22bfloat162_rn({regs[2], regs[3]});
-        }
+    epilogue_store_bf16<NUM_MMA_M, NUM_MMA_N>(acc, C, N, lane_id, warp_id_m, WARP_M, warp_id_n, WARP_N);
 }
 
 // =============================================================================

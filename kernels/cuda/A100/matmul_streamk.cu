@@ -11,22 +11,6 @@
 // Partial results accumulated via atomicAdd, then epilogue converts to bf16.
 // =============================================================================
 
-template <int CTA_SIZE, int HEIGHT, int WIDTH>
-__device__ static void g2s_sk(
-    const __nv_bfloat16 *in, int in_stride, uint32_t out, int tid)
-{
-  constexpr int num_elems = 16 / sizeof(__nv_bfloat16);
-  constexpr int num_iters = (HEIGHT * WIDTH) / (CTA_SIZE * num_elems);
-  #pragma unroll
-  for (int iter = 0; iter < num_iters; iter++) {
-    const int idx = (iter * CTA_SIZE + tid) * num_elems;
-    const int row = idx / WIDTH;
-    const int col = idx % WIDTH;
-    uint32_t dst_addr = out + swizzle_better<WIDTH * sizeof(__nv_bfloat16)>(row, col / num_elems);
-    cp_async(dst_addr, in + row * in_stride + col);
-  }
-}
-
 __global__ void streamk_epilogue_kernel(
     const float* __restrict__ workspace,
     __nv_bfloat16* __restrict__ C,
@@ -110,8 +94,8 @@ __global__ void matmul_streamk_kern(
         const int bn = tile_idx % grid_n;
         const __nv_bfloat16* A_ptr = A + (size_t)bm * BLOCK_M * K + k_step * BLOCK_K;
         const __nv_bfloat16* B_ptr = B + (size_t)bn * BLOCK_N * K + k_step * BLOCK_K;
-        g2s_sk<CTA_SIZE, BLOCK_M, BLOCK_K>(A_ptr, K, A_shm_base, tid);
-        g2s_sk<CTA_SIZE, BLOCK_N, BLOCK_K>(B_ptr, K, B_shm_base, tid);
+        g2s_swizzled<CTA_SIZE, BLOCK_M, BLOCK_K>(A_ptr, K, A_shm_base, tid);
+        g2s_swizzled<CTA_SIZE, BLOCK_N, BLOCK_K>(B_ptr, K, B_shm_base, tid);
         cp_async_commit_group();
     };
 

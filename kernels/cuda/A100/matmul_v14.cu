@@ -7,22 +7,6 @@
 //   registers -> shared memory -> coalesced int4 global stores
 // =============================================================================
 
-template <int CTA_SIZE, int HEIGHT, int WIDTH>
-__device__ static void g2s_v14(
-    const __nv_bfloat16 *in, int in_stride, uint32_t out, int tid)
-{
-  constexpr int num_elems = 16 / sizeof(__nv_bfloat16);
-  constexpr int num_iters = (HEIGHT * WIDTH) / (CTA_SIZE * num_elems);
-  #pragma unroll
-  for (int iter = 0; iter < num_iters; iter++) {
-    const int idx = (iter * CTA_SIZE + tid) * num_elems;
-    const int row = idx / WIDTH;
-    const int col = idx % WIDTH;
-    uint32_t dst_addr = out + swizzle_better<WIDTH * sizeof(__nv_bfloat16)>(row, col / num_elems);
-    cp_async(dst_addr, in + row * in_stride + col);
-  }
-}
-
 template <
     int BLOCK_M, int BLOCK_N, int BLOCK_K,
     int NUM_WARP_M, int NUM_WARP_N,
@@ -53,7 +37,7 @@ __global__ void matmul_v14_kern(
     const int grid_m = cdiv(M, BLOCK_M);
     const int grid_n = cdiv(N, BLOCK_N);
     int bid_m, bid_n;
-    swizzle_triton_v13(bid, grid_m, grid_n, bid_m, bid_n, GROUP_M);
+    swizzle_block_idx_triton(bid, grid_m, grid_n, bid_m, bid_n, GROUP_M);
 
     A += bid_m * BLOCK_M * K;
     B += bid_n * BLOCK_N * K;
@@ -81,8 +65,8 @@ __global__ void matmul_v14_kern(
 
     auto load_AB = [&](int k_iter) {
         const int stage_id = k_iter % NUM_STAGES;
-        g2s_v14<CTA_SIZE, BLOCK_M, BLOCK_K>(A_ptr, K, A_shm_base + stage_id * AB_size, tid);
-        g2s_v14<CTA_SIZE, BLOCK_N, BLOCK_K>(B_ptr, K, B_shm_base + stage_id * AB_size, tid);
+        g2s_swizzled<CTA_SIZE, BLOCK_M, BLOCK_K>(A_ptr, K, A_shm_base + stage_id * AB_size, tid);
+        g2s_swizzled<CTA_SIZE, BLOCK_N, BLOCK_K>(B_ptr, K, B_shm_base + stage_id * AB_size, tid);
         A_ptr += BLOCK_K;
         B_ptr += BLOCK_K;
         cp_async_commit_group();

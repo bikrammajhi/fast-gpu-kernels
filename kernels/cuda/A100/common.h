@@ -32,10 +32,25 @@ __host__ __device__ inline int swizzle_block_idx(int bid, int grid_n, int grid_m
     return block_m * grid_n + block_n;
 }
 
-// Triton-style threadblock swizzle
+// Triton-style threadblock swizzle (compile-time GROUP_M)
 __host__ __device__ inline void swizzle_block_idx_triton(int bid, int grid_m, int grid_n, int &bid_m, int &bid_n) {
     constexpr int GROUP_M = 8;
     if constexpr (GROUP_M == 0) {
+        bid_m = bid / grid_n;
+        bid_n = bid % grid_n;
+    } else {
+        const int group_size = GROUP_M * grid_n;
+        const int group_id = bid / group_size;
+        const int group_off_m = group_id * GROUP_M;
+        const int group_m = (grid_m - group_off_m) < GROUP_M ? (grid_m - group_off_m) : GROUP_M;
+        bid_m = group_off_m + ((bid % group_size) % group_m);
+        bid_n = (bid % group_size) / group_m;
+    }
+}
+
+// Triton-style threadblock swizzle (runtime GROUP_M)
+__host__ __device__ inline void swizzle_block_idx_triton(int bid, int grid_m, int grid_n, int &bid_m, int &bid_n, int GROUP_M) {
+    if (GROUP_M == 0) {
         bid_m = bid / grid_n;
         bid_n = bid % grid_n;
     } else {
@@ -143,6 +158,45 @@ __device__ static uint32_t swizzle_better(uint32_t row, uint32_t col) {
   if constexpr (STRIDE >= 128)
     col ^= (row % 8) / ((128 / STRIDE) > 1 ? (128 / STRIDE) : 1);
   return row * STRIDE + col * 16;
+}
+
+// Async global-to-shared copy with swizzle_better for bank-conflict-free access.
+// Replaces the duplicated g2s_v7/v8/v9/v10/v11/v12/v13/v14/sk functions.
+template <int CTA_SIZE, int HEIGHT, int WIDTH>
+__device__ static void g2s_swizzled(
+    const __nv_bfloat16 *in, int in_stride, uint32_t out, int tid)
+{
+  constexpr int num_elems = 16 / sizeof(__nv_bfloat16);
+  constexpr int num_iters = (HEIGHT * WIDTH) / (CTA_SIZE * num_elems);
+  #pragma unroll
+  for (int iter = 0; iter < num_iters; iter++) {
+    const int idx = (iter * CTA_SIZE + tid) * num_elems;
+    const int row = idx / WIDTH;
+    const int col = idx % WIDTH;
+    uint32_t dst_addr = out + swizzle_better<WIDTH * sizeof(__nv_bfloat16)>(row, col / num_elems);
+    cp_async(dst_addr, in + row * in_stride + col);
+  }
+}
+
+// Epilogue: store MMA accumulator fragments to global memory as bf16.
+// Replaces the duplicated store loops in v7-v14 kernels.
+template <int NUM_MMA_M, int NUM_MMA_N>
+__device__ inline void epilogue_store_bf16(
+    float acc[][NUM_MMA_N][4], __nv_bfloat16* C, int N, int lane_id,
+    int warp_id_m, int WARP_M, int warp_id_n, int WARP_N)
+{
+  #pragma unroll
+  for (int m = 0; m < NUM_MMA_M; m++)
+    #pragma unroll
+    for (int n = 0; n < NUM_MMA_N; n++) {
+      const int row = m * MMA_M + (lane_id / 4);
+      const int col = n * MMA_N + (lane_id % 4) * 2;
+      float *regs = acc[m][n];
+      reinterpret_cast<__nv_bfloat162*>(C + (row + 0) * N + col)[0] =
+          __float22bfloat162_rn({regs[0], regs[1]});
+      reinterpret_cast<__nv_bfloat162*>(C + (row + 8) * N + col)[0] =
+          __float22bfloat162_rn({regs[2], regs[3]});
+    }
 }
 
 template<typename Kern, typename... Args>
