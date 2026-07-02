@@ -41,7 +41,7 @@ v37 + hand-written PTX inline-asm ....... 211 TFLOPS (80.1%)    +7%
 | 6 | v6 | swizzle replaces padding, single-stage | 180.2 | 264.9 | 68.0% | +5% |
 | 7 | v7 | + 2-stage smem (`bP=2`) + pipelined `while` prefetch | 172.9 | 265.9 | 65.0% | −4% |
 | 8 | v8 | + 3-stage smem (`bP=3`) | 200.4 | 264.2 | 75.8% | **+16%** |
-| 9 | v37 | hand-written PTX (`ldmatrix.x4`, `mma.sync`) | 211.0 | 263.4 | **80.1%** | +7% |
+| 9 | ptx_gemm | hand-written PTX (`ldmatrix.x4`, `mma.sync`) | 211.0 | 263.4 | **80.1%** | +7% |
 
 > **Note on v7 regression:** The 2-stage prefetch loop introduces dynamic `while`-loop pointer-swing overhead (`tXsA(_,_,_,smem_pipe_read)` index math) that exceeds the latency-hiding benefit at this tile size on A100. The 3-stage buffer in v8 is the correct sweet spot.
 
@@ -113,74 +113,38 @@ The following kernels are preserved in `experiments/` for reference. All were be
 ```
 kernels/cute/A100/
 ├── README.md              ← you are here
-├── benchmark.cu           Multi-size benchmark vs cuBLAS
-├── bench_all.sh           Modal runner: v1–v9
-├── bench_all_8192.sh      Modal runner: v1–v37 at 8192
 ├── Notes.md               Copy atom / LDSM / bank-conflict notes
-├── matmul_v1.cu           Baseline
-├── matmul_v2.cu           + 128-bit vector loads
-├── matmul_v3.cu           + smem padding
-├── matmul_v4.cu           + swizzle (regresses at 8192)
-├── matmul_v5.cu           + cp.async CACHEALWAYS
-├── matmul_v6.cu           + swizzle replaces padding
-├── matmul_v7.cu           + 2-stage smem + prefetch loop
-├── matmul_v8.cu           + 3-stage smem (sweet spot)
-├── matmul_v37.cu          + hand-written PTX
-├── experiments/           Regressed / broken kernels
-│   ├── v9.cu
-│   ├── v21.cu
-│   ├── v22.cu … v36.cu
-│   └── ...
-└── good_versions/         Mirrored copies of confirmed high-performing kernels
-    ├── v1.cu … v8.cu
-    └── v37.cu
+├── benchmark.cu           Multi-size benchmark vs cuBLAS
+├── ptx_gemm.cu            Hand-written PTX kernel
+├── matmul_v1.cu … matmul_v8.cu   Optimization ladder
+├── scripts/
+│   ├── bench_all.sh       Modal runner: v1–v9
+│   └── bench_all_8192.sh  Modal runner: v1–v37 at 8192
+└── experiments/           Regressed / broken kernels
+    ├── v9.cu
+    ├── v21.cu
+    ├── v22.cu … v36.cu
+    └── ...
 ```
 
 ---
 
-## Building & Running
+## Running
 
 ### Prerequisites
 - NVIDIA CUDA toolkit (`nvcc`)
 - CUTLASS headers (`$CUTLASS/include`, `$CUTLASS/tools/util/include`)
 - cuBLAS
-- Optional: [Modal](https://modal.com) for remote A100 execution
-
-### Local build
-
-```bash
-# Compile a single kernel
-nvcc -O3 -arch=sm_80 \
-  -I$CUTLASS/include -I$CUTLASS/tools/util/include \
-  -lcublas matmul_v8.cu -o /tmp/matmul_v8
-/tmp/matmul_v8
-
-# Compile and run multi-size benchmark
-nvcc -O3 -arch=sm_80 \
-  -I$CUTLASS/include -I$CUTLASS/tools/util/include \
-  -lcublas benchmark.cu -o /tmp/benchmark
-/tmp/matmul_v8
-```
+- [Modal](https://modal.com) for remote A100 execution
 
 ### Remote benchmark via Modal
 
 ```bash
-# Run all 9 main kernels (v1–v9)
-bash kernels/cute/A100/bench_all.sh
+# Run all 9 canonical kernels (v1–v9 + ptx_gemm)
+bash kernels/cute/A100/scripts/bench_all.sh
 
-# Run full 8192 sweep including experiments (v1–v37)
-bash kernels/cute/A100/bench_all_8192.sh
-```
-
-### Benchmark harness
-
-`benchmark.cu` is parameterized by the included kernel header. To benchmark a different version:
-
-```bash
-# Temporarily swap the include
-sed -i 's|#include "matmul_v1.cu"|#include "matmul_v37.cu"|' benchmark.cu
-nvcc -O3 -arch=sm_80 -I$CUTLASS/include -I$CUTLASS/tools/util/include \
-  -lcublas benchmark.cu -o /tmp/bench_v37 && /tmp/bench_v37
+# Run full 8192 sweep including experiments
+bash kernels/cute/A100/scripts/bench_all_8192.sh
 ```
 
 ---
