@@ -95,34 +95,16 @@ The following kernels are preserved in `experiments/` for reference. All were be
 ```
 kernels/cute/A100/
 ├── README.md              ← you are here
-├── benchmark.cu           Multi-size benchmark vs cuBLAS
-├── ptx_gemm.cu            Hand-written PTX kernel
-├── matmul_v1.cu … matmul_v8.cu   Optimization ladder
-├── scripts/
-│   ├── bench_all.sh       Modal runner: v1–v9
-│   └── bench_all_8192.sh  Modal runner: full 8192 sweep
-├── experiments/           Regressed / broken kernels
-│   ├── v9.cu
-│   ├── v21.cu
-│   ├── v22.cu … v37.cu
-│   └── ...
-└── docs/                  Design notes
-    ├── Notes.md
-    ├── DEBUG.md
-    └── MMA_TILING_NOTES.md
-```
-kernels/cute/A100/
-├── README.md              ← you are here
-├── docs/                   Design notes
-│   ├── Notes.md            Copy atom / LDSM / bank-conflict notes
-│   ├── DEBUG.md            Debug history and fixes
+├── docs/                  Design notes
+│   ├── Notes.md           Copy atom / LDSM / bank-conflict notes
+│   ├── DEBUG.md           Debug history and fixes
 │   └── MMA_TILING_NOTES.md MMA tiling rationale
 ├── benchmark.cu           Multi-size benchmark vs cuBLAS
 ├── ptx_gemm.cu            Hand-written PTX kernel
 ├── matmul_v1.cu … matmul_v8.cu   Optimization ladder
-├── scripts/
-│   ├── bench_all.sh       Modal runner: v1–v9
-│   └── bench_all_8192.sh  Modal runner: v1–v37 at 8192
+├── scripts/               Modal runners
+│   ├── bench_all.sh       v1–v9
+│   └── bench_all_8192.sh  full 8192 sweep
 └── experiments/           Regressed / broken kernels
     ├── v9.cu
     ├── v21.cu
