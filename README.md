@@ -1,339 +1,105 @@
-# gpulab 🔬
+# A100 BF16 GEMM Kernel Lab
 
-A personal GPU kernel lab for running kernels across every major framework on NVIDIA Blackwell (B200) using [Modal](https://modal.com).
+Hand-optimized BF16 GEMM on NVIDIA A100-SXM4-40GB.
 
-One command to run anything:
-
-```bash
-modal run scripts/run.py --task kernels/cuda/vector_add.cu
-modal run scripts/run.py --task kernels/triton/vector_add.py
-modal run scripts/run.py --task kernels/cute/vector_add.cu
-modal run scripts/run.py --task kernels/cute_dsl/vector_add.py
-modal run scripts/run.py --task kernels/cutlass/gemm.cu
-modal run scripts/run.py --task kernels/quack/rmsnorm.py
-modal run scripts/run.py --task repos/cutlass/examples/python/CuTeDSL/blackwell/dense_gemm.py
-```
+**Hardware:** A100-SXM4-40GB | 312 TFLOPS BF16 peak | 108 SMs | 1.5 TB/s HBM2e
+**Target:** M = N = K = 16384, bf16
 
 ---
 
-## What's Inside
+## CUDA Kernels
 
-| Framework | Directory | Type | Notes |
-|---|---|---|---|
-| CUDA | `kernels/cuda/` | `.cu` | Raw CUDA, compiled with `nvcc` |
-| CuTe C++ | `kernels/cute/` | `.cu` | Layout algebra, part of CUTLASS 3.x |
-| CUTLASS | `kernels/cutlass/` | `.cu` | High-performance GEMM/conv primitives |
-| Triton | `kernels/triton/` | `.py` | OpenAI's Python GPU kernel DSL |
-| CuTe DSL | `kernels/cute_dsl/` | `.py` | NVIDIA's Python JIT compiler for CuTe |
-| Quack | `kernels/quack/` | `.py` | Production CuTe DSL kernels (rmsnorm, softmax, etc.) |
+### Results
 
-CUTLASS repo examples can be run directly from `repos/cutlass/` — they resolve against the image's cloned copy, not your local files.
+| Kernel | Technique | TFLOPS | % Peak | Δ |
+|--------|-----------|--------|--------|---|
+| v1 | Baseline | 64.2 | 20.6% | — |
+| v2 | + `cp.async` 2-stage | 73.2 | 23.5% | +14% |
+| v3 | + SMEM padding (+8) | 152.1 | 48.7% | **+108%** |
+| v4 | + XOR swizzle | 153.9 | 49.3% | +1% |
+| v7s3 | + `ldmatrix.x4` + 3-stage | 219.5 | 70.3% | +43% |
+| v10 | + lambda-local regs | 252.6 | 81.0% | +15% |
+| v11a | + 4x2 warps (256T) | **258.7** | 82.9% | +2% |
+| cuBLAS | Reference | 300.4 | 96.3% | — |
+
+### Full Sweep
+
+| N | v1 | v2 | v3 | v4 | v7s3 | v10 | v11a | cuBLAS |
+|---|------|------|------|------|--------|--------|--------|--------|
+| 128 | 0.2 | 0.3 | 0.4 | 0.4 | 0.4 | 0.4 | 0.4 | 0.5 |
+| 256 | 1.2 | 1.3 | 2.2 | 2.3 | 2.5 | 2.5 | 2.5 | 3.6 |
+| 512 | 5.6 | 6.1 | 12.1 | 12.9 | 14.2 | 14.2 | 14.4 | 26.2 |
+| 1024 | 23.6 | 26.5 | 57.7 | 62.2 | 70.7 | 70.8 | 71.5 | 86.5 |
+| 2048 | 37.3 | 41.9 | 102.8 | 114.1 | 114.8 | 130.2 | 131.8 | 124.2 |
+| 4096 | 47.0 | 53.0 | 180.5 | 196.7 | 227.4 | 229.7 | 230.3 | 269.8 |
+| 8192 | 64.2 | 72.7 | 162.2 | 213.4 | 215.1 | 247.2 | 254.1 | 295.2 |
+| 16384 | 64.2 | 73.2 | 152.1 | 153.9 | 219.5 | 252.6 | 258.7 | 300.4 |
+
+---
+
+## CuTe Kernels
+
+### Results
+
+| # | Kernel | Key Optimization | TFLOP/s | % of cuBLAS | Δ |
+|---|--------|-----------------|---------|-------------|---|
+| 1 | v1 | Baseline | 45.9 | 16.9% | — |
+| 2 | v2 | + vector loads | 58.4 | 22.2% | +26% |
+| 3 | v3 | + SMEM padding | 134.5 | 50.5% | **+131%** |
+| 4 | v4 | + `Swizzle<3,3,3>` | 115.3 | 42.9% | −14% |
+| 5 | v5 | + `cp.async` CACHEALWAYS | 170.8 | 64.1% | **+48%** |
+| 6 | v6 | swizzle, single-stage | 180.2 | 68.0% | +5% |
+| 7 | v7 | + 2-stage smem, pipelined K-loop | 172.9 | 65.0% | −4% |
+| 8 | v8 | + 3-stage smem | 200.4 | 75.8% | **+16%** |
+| 9 | ptx_gemm | + inline PTX | **211.0** | 79.4% | +7% |
+| cuBLAS | Reference | 263.4 | — | — |
+
+---
+
+## Key Takeaways
+
+| Optimization | Impact |
+|-------------|--------|
+| Bank conflict fix (padding) | **+108%** |
+| Multi-stage + ldmatrix.x4 | +43% |
+| `cp.async` CACHEALWAYS | +48% |
+| Hand-written PTX (CuTe) | +7% vs CuTe abstraction ceiling |
+
+**The lesson:** Profile first. One constant (`kPad=8`) can double throughput.
 
 ---
 
 ## Project Structure
 
 ```
-gpulab/
-├── kernels/                  # your kernels — mounted fresh on every run
-│   ├── cuda/
-│   ├── cute/
-│   ├── cute_dsl/
-│   ├── cutlass/
-│   ├── triton/
-│   └── quack/
-├── repos/                    # local copies for reading — never uploaded to Modal
-│   └── cutlass/
-├── src/
-│   └── gpulab/
-│       ├── __init__.py
-│       ├── compiler.py       # compile flags per backend
-│       ├── runner.py         # dispatch logic
-│       └── modal_app.py      # Modal image + remote function
-├── scripts/
-│   └── run.py                # CLI entrypoint
-├── pyproject.toml
-└── .gitignore
+kernels/
+├── cuda/
+│   └── A100/
+│       ├── matmul_v1.cu ... matmul_v11.cu
+│       ├── benchmark.cu
+│       ├── common.h
+│       ├── docs/
+│       └── experiments/
+└── cute/
+    └── A100/
+        ├── matmul_v1.cu ... matmul_v8.cu
+        ├── ptx_gemm.cu
+        ├── benchmark.cu
+        ├── docs/
+        └── experiments/
 ```
 
 ---
 
-## Prerequisites
+## Run
 
-- Python 3.12+
-- [conda](https://docs.conda.io/en/latest/miniconda.html) (recommended)
-- A [Modal](https://modal.com) account (free tier works)
-
----
-
-## Setup
-
-### 1. Clone and create environment
-
+### CUDA
 ```bash
-git clone https://github.com/your-handle/gpulab.git
-cd gpulab
-
-conda create -n gpulab python=3.12
-conda activate gpulab
+modal run scripts/run.py --task kernels/cuda/A100/benchmark.cu
 ```
 
-### 2. Install dependencies
-
+### CuTe
 ```bash
-pip install -e .
-pip install modal
+bash kernels/cute/A100/scripts/bench_all.sh
+bash kernels/cute/A100/scripts/bench_all_8192.sh
 ```
-
-### 3. Log in to Modal
-
-```bash
-modal setup
-```
-
-This opens a browser window to authenticate. Once done, your credentials are saved locally.
-
-Verify it works:
-
-```bash
-modal profile list
-```
-
-### 4. Verify Modal is working
-
-```bash
-modal run scripts/run.py --task kernels/cuda/vector_add.cu
-```
-
-The first run builds the container image — this takes a few minutes. Every run after that is fast. You should see:
-
-```
-╭──────────────────── kernels/cuda/vector_add.cu ────────────────────╮
-│ cuda vector_add: n=1048576  c[0]=3.0  PASSED                       │
-╰────────────────────────────────────────────────────────────────────╯
-```
-
----
-
-## Running Kernels
-
-```bash
-# CUDA
-modal run scripts/run.py --task kernels/cuda/vector_add.cu
-
-# CuTe C++
-modal run scripts/run.py --task kernels/cute/vector_add.cu
-
-# CUTLASS
-modal run scripts/run.py --task kernels/cutlass/gemm.cu
-
-# Triton
-modal run scripts/run.py --task kernels/triton/vector_add.py
-
-# CuTe DSL
-modal run scripts/run.py --task kernels/cute_dsl/vector_add.py
-
-# Quack
-modal run scripts/run.py --task kernels/quack/rmsnorm.py
-
-# Official CUTLASS examples from the repo
-modal run scripts/run.py --task repos/cutlass/examples/python/CuTeDSL/blackwell/dense_gemm.py
-
-# Extra nvcc flags (e.g. for profiling)
-modal run scripts/run.py --task kernels/cuda/vector_add.cu --flags="-lineinfo"
-```
-
----
-
-## Writing Your Own Kernels
-
-### `.cu` kernels
-
-Write a standard `int main()`. Drop the file in the right directory and run it — the backend is auto-detected from the folder name.
-
-```c
-// kernels/cuda/my_kernel.cu
-#include <stdio.h>
-#include <cuda_runtime.h>
-
-__global__ void my_kernel(...) { ... }
-
-int main() {
-    // allocate, launch, verify
-    printf("PASSED\n");
-    return 0;
-}
-```
-
-```bash
-modal run scripts/run.py --task kernels/cuda/my_kernel.cu
-```
-
-### `.py` kernels (Triton, CuTe DSL, Quack)
-
-Define a `run(**params)` function that returns a string. The runner calls this function.
-
-```python
-# kernels/triton/my_kernel.py
-import torch
-import triton
-import triton.language as tl
-
-@triton.jit
-def my_kernel(...):
-    ...
-
-def run(**params):
-    # set up tensors, launch kernel, verify
-    return "my_kernel: PASSED"
-```
-
-```bash
-modal run scripts/run.py --task kernels/triton/my_kernel.py
-```
-
-If your script runs computation at the module level (no `run()` function), that is fine too — the runner handles it gracefully.
-
----
-
-## How the Backend is Detected
-
-The runner infers which backend to use from the file path:
-
-| Path contains | Backend | What happens |
-|---|---|---|
-| `cuda/` | cuda | `nvcc -arch=sm_100` |
-| `cute/` | cutlass | `nvcc` + CUTLASS includes |
-| `cutlass/` | cutlass | `nvcc` + CUTLASS includes + `-std=c++17` |
-| `cute_dsl/` | cute_dsl | Python import |
-| `triton/` | triton | Python import |
-| `quack/` | quack | Python import |
-| `repos/` | repos_cutlass | Resolved against image's `/root/cutlass` |
-
----
-
-## How the Image Works
-
-The container image is built once and cached. It contains:
-
-- `nvidia/cuda:13.1.1-cudnn-devel-ubuntu24.04` (base)
-- `torch`, `triton`, `numpy`, `rich`, `jax[cuda12]`, `nvidia-cutlass-dsl[cu13]`, `quack-kernels[cu13]`
-- CUTLASS cloned at `/root/cutlass`
-
-Only `kernels/` and `src/` are uploaded on every run — both are small and fast. `repos/` is never uploaded.
-
-**When does the image rebuild?** Only when you change `modal_app.py` — adding a new pip package, a new `run_commands`, etc. Changes to `kernels/` and `src/` never trigger a rebuild.
-
----
-
-## Adding a New Framework
-
-Follow these four steps:
-
-**1. Install it in the image** — edit `src/gpulab/modal_app.py`:
-```python
-.pip_install("new-package")
-# or
-.run_commands("git clone https://github.com/org/repo.git /root/repo")
-```
-
-**2. Add include paths** — edit `src/gpulab/compiler.py` if it is a C++ framework:
-```python
-INCLUDES["new_backend"] = ["-I/root/repo/include"]
-```
-
-**3. Add a compile function** — edit `src/gpulab/compiler.py`:
-```python
-def compile_new_backend(src, binary, extra_flags):
-    _nvcc(src, binary, INCLUDES["new_backend"], extra_flags)
-```
-
-**4. Add backend detection** — edit `src/gpulab/runner.py`:
-```python
-if "new_backend" in parts: return "new_backend"
-```
-
-This triggers one image rebuild. After that, every run with the new framework is fast.
-
----
-
-## Adding an External Repo
-
-For repos you want to clone locally and read but run from the image:
-
-```bash
-# Clone locally for reading
-git clone https://github.com/org/repo repos/repo
-```
-
-Add to image in `modal_app.py`:
-```python
-.run_commands("git clone --depth 1 https://github.com/org/repo.git /root/repo")
-```
-
-The local copy in `repos/` is for reading the code. The container uses its own clone.
-
----
-
-## Common Issues
-
-**`modal` command not found or wrong version**
-
-Make sure `which modal` and `which python` both point to your conda env:
-```bash
-conda activate gpulab
-which modal   # should contain gpulab
-which python  # should contain gpulab
-```
-
-If `modal` points to `~/.local/bin/modal`, add your conda env to PATH:
-```bash
-echo 'export PATH="$CONDA_PREFIX/bin:$PATH"' >> ~/.bashrc
-source ~/.bashrc
-```
-
-**Files not found in container**
-
-If you get `FileNotFoundError` for a file that exists locally, the most common cause is a nested `.git` directory blocking Modal's file sync. Fix:
-```bash
-rm -rf repos/myrepo/.git
-```
-
-Or better: do not mount `repos/` at all — clone repos into the image instead.
-
-**`cute/tensor.hpp: No such file or directory`**
-
-Your kernel is in `kernels/cuda/` but includes CuTe headers. Move it to `kernels/cute/` — the runner will automatically add CUTLASS include paths.
-
-**CUTLASS compile errors about C++17**
-
-The `compile_cutlass` function already passes `-std=c++17`. If you are calling `compile_cuda` on a CUTLASS kernel, make sure the file is in `kernels/cutlass/` or `kernels/cute/`.
-
-**Quack crashes with `No module named 'jax.numpy'`**
-
-JAX is missing. Make sure `jax[cuda12]` is in your `pip_install()` in `modal_app.py` and rebuild the image.
-
----
-
-## Target Hardware
-
-All kernels are compiled for `sm_100` (NVIDIA Blackwell, B200/B300). To target a different GPU, update `ARCH` in `src/gpulab/compiler.py`:
-
-```python
-# H100 (Hopper)
-ARCH = ["-arch=sm_90", "-gencode", "arch=compute_90,code=sm_90"]
-
-# A100 (Ampere)
-ARCH = ["-arch=sm_80", "-gencode", "arch=compute_80,code=sm_80"]
-```
-
-And update `gpu="B200"` in `src/gpulab/modal_app.py` to match.
-
----
-
-## Acknowledgements
-
-- [Modal](https://modal.com) for the GPU infrastructure
-- [NVIDIA CUTLASS](https://github.com/NVIDIA/cutlass) for CuTe and CUTLASS
-- [Dao-AILab Quack](https://github.com/Dao-AILab/quack) for production CuTe DSL kernels
-- [OpenAI Triton](https://github.com/openai/triton) for the Python GPU kernel DSL
