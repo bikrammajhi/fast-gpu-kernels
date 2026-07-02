@@ -5,7 +5,7 @@ Hand-written BF16 GEMM kernels for NVIDIA A100-SXM4-40GB, implemented with NVIDI
 **Target:** M = N = K = 8192, bf16  
 **Hardware:** A100-SXM4-40GB (108 SMs, SM80)  
 **Peak TFLOPS:** 312 (bf16)  
-**Best kernel:** 211 TFLOPS (79.4% of cuBLAS at 263 TFLOPS)
+**Best kernel:** 211 TFLOPS (80.1% of cuBLAS at 263 TFLOPS)
 
 ---
 
