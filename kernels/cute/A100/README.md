@@ -9,24 +9,6 @@ Hand-written BF16 GEMM kernels for NVIDIA A100-SXM4-40GB, implemented with NVIDI
 
 ---
 
-## Optimization Ladder
-
-The following nine kernels represent the canonical optimization path. Each kernel is self-contained with its own `main()` for standalone benchmarking, or can be swapped into `benchmark.cu` for multi-size sweeps.
-
-```
-v1  Baseline ............................  46 TFLOPS (17.3%)
-v2  + 128-bit vectorized gmem loads .....  58 TFLOPS (22.2%)   +26%
-v3  + smem bank-conflict padding ........ 134 TFLOPS (50.5%)  +131%
-v4  + XOR swizzle (regresses at 8192) ... 115 TFLOPS (43.0%)   −14%
-v5  + cp.async CACHEALWAYS .............. 171 TFLOPS (64.1%)   +48%
-v6  + swizzle replaces padding .......... 180 TFLOPS (68.0%)    +5%
-v7  + 2-stage smem + prefetch loop ...... 173 TFLOPS (65.0%)    −4%
-v8  + 3-stage smem (sweet spot) ......... 200 TFLOPS (75.8%)   +16%
-ptx_gemm  + hand-written PTX inline-asm ..  211 TFLOPS (80.1%)    +7%
-```
-
-**cuBLAS reference:** ~266 TFLOPS (100%)
-
 ---
 
 ## Measured Performance (8192×8192×8192, bf16)
@@ -113,7 +95,28 @@ The following kernels are preserved in `experiments/` for reference. All were be
 ```
 kernels/cute/A100/
 ├── README.md              ← you are here
-├── Notes.md               Copy atom / LDSM / bank-conflict notes
+├── benchmark.cu           Multi-size benchmark vs cuBLAS
+├── ptx_gemm.cu            Hand-written PTX kernel
+├── matmul_v1.cu … matmul_v8.cu   Optimization ladder
+├── scripts/
+│   ├── bench_all.sh       Modal runner: v1–v9
+│   └── bench_all_8192.sh  Modal runner: full 8192 sweep
+├── experiments/           Regressed / broken kernels
+│   ├── v9.cu
+│   ├── v21.cu
+│   ├── v22.cu … v37.cu
+│   └── ...
+└── docs/                  Design notes
+    ├── Notes.md
+    ├── DEBUG.md
+    └── MMA_TILING_NOTES.md
+```
+kernels/cute/A100/
+├── README.md              ← you are here
+├── docs/                   Design notes
+│   ├── Notes.md            Copy atom / LDSM / bank-conflict notes
+│   ├── DEBUG.md            Debug history and fixes
+│   └── MMA_TILING_NOTES.md MMA tiling rationale
 ├── benchmark.cu           Multi-size benchmark vs cuBLAS
 ├── ptx_gemm.cu            Hand-written PTX kernel
 ├── matmul_v1.cu … matmul_v8.cu   Optimization ladder
