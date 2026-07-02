@@ -115,17 +115,5 @@ kernels/cuda/A100/
 ## Building and Running
 
 ```bash
-# On Modal (A100 GPU)
 modal run scripts/run.py --task kernels/cuda/A100/benchmark.cu
-
-# Local compile
-nvcc -O3 -arch=sm_80 --std=c++17 --expt-relaxed-constexpr \
-    -lcublas -o benchmark benchmark.cu
-./benchmark
 ```
-
-## Adding a New Kernel
-
-1. Create `matmul_vN.cu` with a `matmul_vN_launch(A, B, C, M, N, K)` function
-2. In `benchmark.cu`: add `#include "matmul_vN.cu"` and `{ "vN", matmul_vN_launch }` to `kernels[]`
-3. Run the benchmark to verify correctness and measure performance
