@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <vector>
 #include <cuda_bf16.h>
 #include <cuda_runtime.h>
 #include <cublas_v2.h>
@@ -63,6 +64,49 @@ __host__ __device__ inline void swizzle_block_idx_triton(int bid, int grid_m, in
     }
 }
 
+// Hilbert curve: index d -> (x, y) on an n×n grid. n must be power of 2.
+__host__ __device__ inline void d2xy(int n, int d, int* x, int* y) {
+    int rx, ry, s, t = d;
+    *x = *y = 0;
+    for (s = 1; s < n; s *= 2) {
+        rx = 1 & (t / 2);
+        ry = 1 & (t ^ rx);
+        if (ry == 0) {
+            if (rx == 1) {
+                *x = s - 1 - *x;
+                *y = s - 1 - *y;
+            }
+            int tmp = *x;
+            *x = *y;
+            *y = tmp;
+        }
+        *x += s * rx;
+        *y += s * ry;
+        t /= 4;
+    }
+}
+
+// Host-side: build Hilbert schedule for a grid_m × grid_n tile layout.
+// Returns packed (m << 16 | n) coordinates in the order visited by a
+// space-filling Hilbert curve.  The property we rely on: ranks that are
+// numerically close correspond to tiles that are spatially close in 2-D,
+// so the GPU's block scheduler tends to keep related tiles together in L2.
+inline std::vector<int> create_hilbert_schedule(int grid_m, int grid_n) {
+    int dim = 1;
+    while (dim < grid_m || dim < grid_n) dim <<= 1;
+
+    std::vector<int> order;
+    order.reserve(grid_m * grid_n);
+    for (int i = 0; i < dim * dim; ++i) {
+        int x, y;
+        d2xy(dim, i, &x, &y);
+        if (x < grid_m && y < grid_n) {
+            order.push_back((x << 16) | (y & 0xFFFF));
+        }
+    }
+    return order;
+}
+
 static constexpr int MMA_M = 16;
 static constexpr int MMA_N = 8;
 static constexpr int MMA_K = 16;
@@ -109,6 +153,11 @@ __device__ void gmem2smem(const __nv_bfloat16* src, int src_stride,
 __device__ inline
 void cp_async(uint32_t dst, const void *src) {
   asm volatile("cp.async.cg.shared.global [%0], [%1], 16;" ::"r"(dst), "l"(src));
+};
+
+__device__ inline
+void cp_async_ca(uint32_t dst, const void *src) {
+  asm volatile("cp.async.ca.shared.global.L2::128B [%0], [%1], 16;" ::"r"(dst), "l"(src));
 };
 
 __device__ inline
@@ -175,6 +224,23 @@ __device__ static void g2s_swizzled(
     const int col = idx % WIDTH;
     uint32_t dst_addr = out + swizzle_better<WIDTH * sizeof(__nv_bfloat16)>(row, col / num_elems);
     cp_async(dst_addr, in + row * in_stride + col);
+  }
+}
+
+// Same as g2s_swizzled but uses cp.async.ca (cache-always / L2 sticky).
+template <int CTA_SIZE, int HEIGHT, int WIDTH>
+__device__ static void g2s_swizzled_ca(
+    const __nv_bfloat16 *in, int in_stride, uint32_t out, int tid)
+{
+  constexpr int num_elems = 16 / sizeof(__nv_bfloat16);
+  constexpr int num_iters = (HEIGHT * WIDTH) / (CTA_SIZE * num_elems);
+  #pragma unroll
+  for (int iter = 0; iter < num_iters; iter++) {
+    const int idx = (iter * CTA_SIZE + tid) * num_elems;
+    const int row = idx / WIDTH;
+    const int col = idx % WIDTH;
+    uint32_t dst_addr = out + swizzle_better<WIDTH * sizeof(__nv_bfloat16)>(row, col / num_elems);
+    cp_async_ca(dst_addr, in + row * in_stride + col);
   }
 }
 
