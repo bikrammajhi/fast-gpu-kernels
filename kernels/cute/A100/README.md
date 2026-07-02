@@ -2,14 +2,14 @@
 
 Hand-written BF16 GEMM kernels for NVIDIA A100-SXM4-40GB, implemented with NVIDIA CuTe.
 
-**Target:** M = N = K = 8192, bf16  
+**Target:** M = N = K = 16384, bf16  
 **Hardware:** A100-SXM4-40GB (108 SMs, SM80)  
 **Peak TFLOPS:** 312 (bf16)  
 **Best kernel:** 211 TFLOPS (80.1% of cuBLAS at 263 TFLOPS)
 
 ---
 
-## Results (8192×8192×8192, bf16)
+## Results (16384×16384×16384, bf16)
 
 | # | Kernel | Key Optimization | TFLOP/s | % of cuBLAS | Δ |
 |---|--------|-----------------|---------|-------------|---|
