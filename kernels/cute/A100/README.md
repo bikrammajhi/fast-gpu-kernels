@@ -72,8 +72,8 @@ Add a `stages` dimension (`bP = Int<2>{}`) and restructure the K-loop into a `wh
 ### v7 → v8: 3-stage smem (sweet spot)
 Increase to `bP = Int<3>{}` (3 stages = two tiles buffered + one in-flight). The `cp.async` round-trip fully hides behind the current tile's MMA. 4+ stages over-subscribes registers for 128×128×64 tiles on A100.
 
-### v8 → v37: Hand-written PTX
-v37 abandons CuTe's high-level API entirely for inline PTX with:
+### v8 → ptx_gemm: Hand-written PTX
+`ptx_gemm.cu` abandons CuTe's high-level API entirely for inline PTX with:
 - `ldmatrix.x4` for B (loads two B matrices per instruction)
 - `mma.sync.aligned.m16n8k16`
 - Explicit double-buffered register files for A/B fragments
