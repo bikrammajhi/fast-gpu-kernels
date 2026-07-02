@@ -2,9 +2,9 @@
 
 Hand-optimized BF16 GEMM on NVIDIA A100-SXM4-40GB.
 
-**Hardware:** A100-SXM4-40GB | 312 TFLOPS BF16 peak | 108 SMs | 1.5 TB/s HBM2e
-**Target:** N = 16384, bf16
-**Best kernel:** 259 TFLOPS (82.9% of cuBLAS at 300 TFLOPS)
+**Hardware:** A100-SXM4-40GB | 312 TFLOPS BF16 peak | 108 SMs |
+**Target:** N = 16384, bf16  |
+**Best kernel:** 259 TFLOPS (82.9% of BF16 peak)  
 
 ---
 
