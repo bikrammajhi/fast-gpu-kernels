@@ -11,7 +11,7 @@ Hand-written BF16 GEMM kernels for NVIDIA A100-SXM4-40GB, implemented with NVIDI
 
 ## Optimization Ladder
 
-The following nine kernels represent the canonical optimization path. Each kernel is self-contained in `matmul_v<N>.cu` and includes its own `main()` for standalone benchmarking, or can be swapped into `benchmark.cu` for multi-size sweeps.
+The following nine kernels represent the canonical optimization path. Each kernel is self-contained with its own `main()` for standalone benchmarking, or can be swapped into `benchmark.cu` for multi-size sweeps.
 
 ```
 v1  Baseline ............................  46 TFLOPS (17.3%)
@@ -22,7 +22,7 @@ v5  + cp.async CACHEALWAYS .............. 171 TFLOPS (64.1%)   +48%
 v6  + swizzle replaces padding .......... 180 TFLOPS (68.0%)    +5%
 v7  + 2-stage smem + prefetch loop ...... 173 TFLOPS (65.0%)    −4%
 v8  + 3-stage smem (sweet spot) ......... 200 TFLOPS (75.8%)   +16%
-v37 + hand-written PTX inline-asm ....... 211 TFLOPS (80.1%)    +7%
+ptx_gemm  + hand-written PTX inline-asm ..  211 TFLOPS (80.1%)    +7%
 ```
 
 **cuBLAS reference:** ~266 TFLOPS (100%)
@@ -140,7 +140,7 @@ kernels/cute/A100/
 ### Remote benchmark via Modal
 
 ```bash
-# Run all 9 canonical kernels (v1–v9 + ptx_gemm)
+# Run all 9 canonical kernels (v1–v9)
 bash kernels/cute/A100/scripts/bench_all.sh
 
 # Run full 8192 sweep including experiments

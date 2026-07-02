@@ -3,7 +3,7 @@
 **Hardware**: NVIDIA A100-SXM4-40GB (108 SMs, SM80)
 **Problem**: M=N=K=8192, bf16
 **Reference**: cuBLAS ≈ 266 TFLOPS
-**Result**: v37 hand-written PTX kernel → 211 TFLOPS (79.4% of cuBLAS)
+**Result**: `ptx_gemm.cu` — 211 TFLOPS (79.4% of cuBLAS)
 
 ---
 
@@ -121,9 +121,9 @@ auto sB = tile_to_shape(swizzled_128B_atom, make_shape(bN, bK, Int<bP>{}));
 
 ---
 
-## 9. Plateau and PTX escape (v37) — 211 TFLOPS (+7%)
+## 9. Plateau and PTX escape (`ptx_gemm.cu`) — 211 TFLOPS (+7%)
 
-From v8 onward, tuning grid swizzle factors, K-tile sizes, and scheduling moves the needle by <5%. The final gain comes from v37: abandoning CUTE's high-level API entirely for hand-written PTX inline-asm with `ldmatrix.x4`, `mma.sync.aligned.m16n8k16`, and explicit double-buffered register files.
+From v8 onward, tuning grid swizzle factors, K-tile sizes, and scheduling moves the needle by <5%. The final gain comes from `ptx_gemm.cu`: abandoning CUTE's high-level API entirely for hand-written PTX inline-asm with `ldmatrix.x4`, `mma.sync.aligned.m16n8k16`, and explicit double-buffered register files.
 
 ---
 
@@ -151,13 +151,13 @@ From v8 onward, tuning grid swizzle factors, K-tile sizes, and scheduling moves 
 
 ```
 kernels/cute/A100/
-├── matmul_v1.cu … matmul_v9.cu      Optimization ladder
-├── matmul_v21.cu … matmul_v37.cu    Later tuning attempts
+├── matmul_v1.cu … matmul_v8.cu      Optimization ladder
+├── ptx_gemm.cu                       Hand-written PTX kernel
 ├── experiments/                      Regressed / broken kernels
-├── good_versions/                    Confirmed high-performing copies
 ├── benchmark.cu                      Multi-size benchmark vs cuBLAS
-├── bench_all.sh                      Modal runner v1–v6
-├── bench_all_8192.sh                 8192 sweep v1–v37
+├── scripts/
+│   ├── bench_all.sh                  Modal runner v1–v9
+│   └── bench_all_8192.sh             8192 sweep v1–v37
 ├── README.md                         ← you are here
 ├── Notes.md                          Copy atom / LDSM / bank-conflict notes
 └── blog/
@@ -175,10 +175,10 @@ nvcc -O3 -arch=sm_80 \
   -lcublas matmul_v8.cu -o /tmp/matmul_v8 && /tmp/matmul_v8
 
 # Multi-size benchmark via Modal
-bash kernels/cute/A100/bench_all.sh
+bash kernels/cute/A100/scripts/bench_all.sh
 
 # 8192×8192×8192 sweep (v1–v37 + cuBLAS baseline)
-bash kernels/cute/A100/bench_all_8192.sh
+bash kernels/cute/A100/scripts/bench_all_8192.sh
 ```
 
 ---
@@ -187,4 +187,3 @@ bash kernels/cute/A100/bench_all_8192.sh
 
 - `kernels/cute/A100/Notes.md` — inline rationale for copy atoms, LDSM, and bank-conflict strategies
 - `kernels/cute/A100/experiments/` — regressed kernels with diagnosis
-- `kernels/cute/A100/good_versions/` — mirrored copies of confirmed high-performing kernels
