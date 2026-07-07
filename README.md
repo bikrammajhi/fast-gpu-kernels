@@ -1,15 +1,17 @@
-# A100 BF16 GEMM Kernel Lab
+# fast-gpu-kernels
 
-Hand-optimized BF16 GEMM on NVIDIA A100-SXM4-40GB.
+Hand-optimized BF16 GEMM kernels for NVIDIA A100 / H100, benchmarked on Modal.
 
-**Hardware:** A100-SXM4-40GB | 312 TFLOPS BF16 peak | 108 SMs | 1.5 TB/s HBM2e
-**Target:** M = N = K = 16384, bf16
+**Hardware:** A100-SXM4-40GB | H100 (switch via `--gpu`)
+**Target:** M = N = K = 16384, bf16 | Peak: 312 TFLOPS (A100), 395 TFLOPS (Blackwell)
 
 ---
 
-## CUDA Kernels
+## Benchmarks
 
-### Results
+Each table shows peak TFLOPS at the largest GEMM (16384) and the delta versus the previous iteration.
+
+### Hand-written CUDA kernels (A100)
 
 | Kernel | Technique | TFLOPS | % Peak | Δ |
 |--------|-----------|--------|--------|---|
@@ -22,7 +24,7 @@ Hand-optimized BF16 GEMM on NVIDIA A100-SXM4-40GB.
 | v11a | + 4x2 warps (256T) | **258.7** | 82.9% | +2% |
 | cuBLAS | Reference | 300.4 | 96.3% | — |
 
-### Full Sweep
+**Full sweep (A100)**
 
 | N | v1 | v2 | v3 | v4 | v7s3 | v10 | v11a | cuBLAS |
 |---|------|------|------|------|--------|--------|--------|--------|
@@ -37,69 +39,71 @@ Hand-optimized BF16 GEMM on NVIDIA A100-SXM4-40GB.
 
 ---
 
-## CuTe Kernels
+### CuTe kernels (A100 / H100)
 
-### Results
-
-| # | Kernel | Key Optimization | TFLOP/s | % of cuBLAS | Δ |
-|---|--------|-----------------|---------|-------------|---|
+| # | Kernel | Key Optimisation | TFLOP/s | % of cuBLAS | Δ |
+|---|--------|------------------|---------|-------------|---|
 | 1 | v1 | Baseline | 45.9 | 16.9% | — |
 | 2 | v2 | + vector loads | 58.4 | 22.2% | +26% |
 | 3 | v3 | + SMEM padding | 134.5 | 50.5% | **+131%** |
-| 4 | v4 | + `Swizzle<3,3,3>` | 115.3 | 42.9% | −14% |
+| 4 | v4 | + `Swizzle<3,3,3>` | 115.3 | 42.9% | -14% |
 | 5 | v5 | + `cp.async` CACHEALWAYS | 170.8 | 64.1% | **+48%** |
 | 6 | v6 | swizzle, single-stage | 180.2 | 68.0% | +5% |
-| 7 | v7 | + 2-stage smem, pipelined K-loop | 172.9 | 65.0% | −4% |
+| 7 | v7 | + 2-stage smem, pipelined K-loop | 172.9 | 65.0% | -4% |
 | 8 | v8 | + 3-stage smem | 200.4 | 75.8% | **+16%** |
 | 9 | ptx_gemm | + inline PTX | **211.0** | 79.4% | +7% |
-| cuBLAS | Reference | 263.4 | — | — |
+| cuBLAS | Reference | 263.4 | — | — | — |
 
 ---
 
 ## Key Takeaways
 
-| Optimization | Impact |
-|-------------|--------|
-| Bank conflict fix (padding) | **+108%** |
-| Multi-stage + ldmatrix.x4 | +43% |
-| `cp.async` CACHEALWAYS | +48% |
-| Hand-written PTX (CuTe) | +7% vs CuTe abstraction ceiling |
+| Optimisation | Impact |
+|-----------|--------|
+| Bank conflict fix (padding) | **+108%** CUDA, **+131%** CuTe |
+| Multi-stage + `ldmatrix.x4` | +43% |
+| `cp.async` CACHEALWAYS | +48% CuTe |
+| Hand-written PTX | +7% vs CuTe abstraction ceiling |
 
-**The lesson:** Profile first. One constant (`kPad=8`) can double throughput.
-
----
-
-## Project Structure
-
-```
-kernels/
-├── cuda/
-│   └── A100/
-│       ├── matmul_v1.cu ... matmul_v11.cu
-│       ├── benchmark.cu
-│       ├── common.h
-│       ├── docs/
-│       └── experiments/
-└── cute/
-    └── A100/
-        ├── matmul_v1.cu ... matmul_v8.cu
-        ├── ptx_gemm.cu
-        ├── benchmark.cu
-        ├── docs/
-        └── experiments/
-```
+**Rule:** profile first. One constant (`kPad = 8`) can double throughput.
 
 ---
+
+## Requirements
+
+- Python 3.12+
+- [Modal](https://modal.com) account + `modal setup`
+- Git for cloning cutlass
+
+## Setup
+
+```bash
+git clone https://github.com/bikrammajhi/fast-gpu-kernels.git
+cd fast-gpu-kernels
+pip install -e ".[dev]"
+modal setup
+```
 
 ## Run
 
-### CUDA
 ```bash
-modal run scripts/run.py --task kernels/cuda/A100/benchmark.cu
+modal run scripts/run.py --task kernels/cuda/A100/benchmark.cu --gpu A100
+modal run scripts/run.py --task kernels/cute/H100/benchmark.cu --gpu H100
 ```
 
-### CuTe
-```bash
-bash kernels/cute/A100/scripts/bench_all.sh
-bash kernels/cute/A100/scripts/bench_all_8192.sh
-```
+### GPU selection
+
+Edit the default GPU in `scripts/run.py:108` or pass `--gpu`:
+
+| GPU | Modal Name |
+|-----|-----------|
+| B200 | B200 |
+| H200 | H200 |
+| H100 | H100 (default) |
+| RTX PRO 6000 | RTXPRO6000 |
+| A100 80GB | A100-80GB |
+| A100 40GB | A100-40GB |
+| L40S | L40S |
+| A10 | A10 |
+| L4 | L4 |
+| T4 | T4 |

@@ -147,25 +147,6 @@ From v8 onward, tuning grid swizzle factors, K-tile sizes, and scheduling moves 
 
 ---
 
-## Files
-
-```
-kernels/cute/A100/
-├── matmul_v1.cu … matmul_v8.cu      Optimization ladder
-├── ptx_gemm.cu                       Hand-written PTX kernel
-├── experiments/                      Regressed / broken kernels
-├── benchmark.cu                      Multi-size benchmark vs cuBLAS
-├── scripts/
-│   ├── bench_all.sh                  Modal runner v1–v9
-│   └── bench_all_8192.sh             8192 sweep v1–v37
-├── README.md                         ← you are here
-├── Notes.md                          Copy atom / LDSM / bank-conflict notes
-└── blog/
-    └── optimizing-gemm-cute-a100.md  This document
-```
-
----
-
 ## Building & Running
 
 ```bash
@@ -180,10 +161,3 @@ bash kernels/cute/A100/scripts/bench_all.sh
 # 8192×8192×8192 sweep (v1–v37 + cuBLAS baseline)
 bash kernels/cute/A100/scripts/bench_all_8192.sh
 ```
-
----
-
-## References
-
-- `kernels/cute/A100/Notes.md` — inline rationale for copy atoms, LDSM, and bank-conflict strategies
-- `kernels/cute/A100/experiments/` — regressed kernels with diagnosis
