@@ -39,7 +39,7 @@ Each table shows peak TFLOPS at the largest GEMM (16384) and the delta versus th
 
 ---
 
-### CuTe kernels (A100 / H100)
+### CuTe kernels (A100)
 
 | # | Kernel | Key Optimisation | TFLOP/s | % of cuBLAS | Δ |
 |---|--------|------------------|---------|-------------|---|
