@@ -32,7 +32,7 @@ Problem: `M = N = K = 16384`, bf16
 
 | # | Kernel | Key Optimisation | TFLOPS | % of cuBLAS | Δ |
 |---|--------|------------------|--------|-------------|---|
-| cuBLAS | Reference | 263.4 | — | — |
+| cuBLAS | Reference | — | 263.4 | — |
 | 1 | v1 | Baseline | 45.9 | 16.9% | — |
 | 2 | v2 | + vector loads | 58.4 | 22.2% | +26% |
 | 3 | v3 | + SMEM padding | 134.5 | 50.5% | **+131%** |
