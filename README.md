@@ -93,6 +93,33 @@ Problem: `M = N = K = 8192`, bf16
 All B200 versions pass numerical verification against a PyTorch `einsum` reference.  
 **CuTe DSL v5 reaches ~125% of cuBLAS peak.**
 
+## Optimizations
+
+### H100 — Key Techniques
+
+| Technique | Description |
+|-----------|-------------|
+| WGMMA / TMA | Warp-group MMA with Tensor Memory Accelerator async loads |
+| cp.async | 128-bit async gmem→smem copies bypassing L1 |
+| Swizzle `<3,3,3>` | 128-bit shared-memory swizzle to eliminate bank conflicts |
+| 3-stage pipeline | Prefetched K-tile software pipeline with `cp.async_fence` |
+| LDSM `x4` | 128-bit smem→register loads feeding tensor cores |
+| Warpgroup MMA | `warpgroup_arrive/commit/wait` for async warp-group execution |
+| Cluster barriers | `ClusterTransactionBarrier` + `ClusterBarrier` for producer/consumer sync |
+| TMA barriers | Barrier-annotated TMA copies for pipelined gmem→smem |
+
+### B200 — Key Techniques
+
+| Technique | Description |
+|-----------|-------------|
+| TMA | Tensor Memory Accelerator async loads with cp.async |
+| Software pipelining | K-tile overlap via `prefetch_stages=ab_stages-2` |
+| 2-CTA MMA | `use_2cta_instrs=True`, 2×1 cluster for 2× throughput |
+| Warp specialization | Dedicated TMA warp + MMA warp group + epilogue warps |
+| Dynamic shapes | `assumed_align=32`, `mark_layout_dynamic`, `mark_compact_shape_dynamic` |
+| SMEM swizzle | Structured swizzle for bank-conflict-free shared memory |
+| TMEM | Tensor Memory for accumulator staging and epilogue |
+
 ---
 
 ## Requirements
