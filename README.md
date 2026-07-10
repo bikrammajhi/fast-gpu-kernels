@@ -9,9 +9,11 @@ Hand-optimized BF16 GEMM kernels for NVIDIA A100 / H100 / B200, benchmarked on M
 
 ## Benchmarks
 
-Peak TFLOPS at the largest GEMM shape, with delta versus the previous iteration.
+Peak TFLOPS at the largest benchmarked GEMM shape, with delta versus the previous iteration.
 
 ### A100 — Hand-written CUDA
+
+Problem: `M = N = K = 16384`, bf16
 
 | Kernel | Technique | TFLOPS | % of cuBLAS | Δ |
 |--------|-----------|--------|-------------|---|
@@ -25,6 +27,8 @@ Peak TFLOPS at the largest GEMM shape, with delta versus the previous iteration.
 | v11a | + 4x2 warps (256T) | **258.7** | 86.1% | +2% |
 
 ### A100 — CuTe
+
+Problem: `M = N = K = 16384`, bf16
 
 | # | Kernel | Key Optimisation | TFLOPS | % of cuBLAS | Δ |
 |---|--------|------------------|--------|-------------|---|
@@ -41,30 +45,44 @@ Peak TFLOPS at the largest GEMM shape, with delta versus the previous iteration.
 
 ### H100 — CuTe (WGMMA / TMA)
 
+Problem: `M = N = K = 16384`, bf16
+
 | Kernel | Description | TFLOPS | % of cuBLAS |
 |--------|-------------|--------|-------------|
-| cuBLAS | Reference (16384³, bf16) | ~741 | ~75% of peak |
+| cuBLAS | Reference | 741 | — |
 | matmul_v1 | Baseline WGMMA | 356.4 | ~49% |
 | matmul_v2 | WGMMA with prefetch | 365.8 | ~50% |
 | matmul_v3 | WGMMA with cluster sync | 365.6 | ~50% |
 | matmul_v4 | WGMMA with TMA barriers | 365.7 | ~50% |
 
-> **Baseline:** H100 cuBLAS at 16384×16384×16384, bf16 ≈ 741 TFLOPS (~75% of 988 TFLOPS peak). Kernel times: 24.0–24.7 ms.
+> **Note:** H100 peak = ~988 TFLOPS (bf16). cuBLAS achieves ~75% of peak at this shape. Kernel times: 24.0–24.7 ms.
+
+```bash
+modal run scripts/cute/run.py::main --task kernels/cute/H100/matmul_v1.cu --gpu H100
+```
 
 ### H100 — CuTe DSL
+
+Problem: `M = N = K = 4096`, bf16
 
 | Kernel | TFLOPS | % of cuBLAS |
 |--------|--------|-------------|
 | cuBLAS | 776.0 | — |
 | DSL v2 | 684.07 | ~88% |
 
-> **Baseline:** H100 cuBLAS at 4096×4096×4096, bf16 = 776.0 TFLOPS. DSL v2: 200.91 µs, 684.07 TFLOPS.
+> **Note:** DSL v2: 200.91 µs, 684.07 TFLOPS.
+
+```bash
+modal run scripts/cute_dsl/run.py::main --task H100/matmul_v2.py --gpu H100
+```
 
 ### B200 — CuTe DSL
 
+Problem: `M = N = K = 8192`, bf16
+
 | Version | Kernel time (us) | TFLOPS | % of cuBLAS | Speedup vs v1 |
 |---------|------------------|--------|-------------|---------------|
-| cuBLAS | Reference (8192³, Float16) | ~1478 | — | — |
+| cuBLAS | Reference | ~1478 | — | — |
 | v1 | 2400.18 | 458.10 | 31% | 1.00x |
 | v2 | 1229.82 | 894.04 | 60% | 1.95x |
 | v3 | 762.88 | 1441.26 | 97% | 3.15x |
