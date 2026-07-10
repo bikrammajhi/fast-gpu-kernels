@@ -9,7 +9,7 @@ Hand-optimized BF16 GEMM kernels for NVIDIA A100 / H100 / B200, benchmarked on M
 
 ## Benchmarks
 
-Results expressed as % of cuBLAS at the largest GEMM shape, with delta versus the previous iteration.
+Peak TFLOPS at the largest GEMM shape, with delta versus the previous iteration.
 
 ### A100 — Hand-written CUDA
 
@@ -26,51 +26,51 @@ Results expressed as % of cuBLAS at the largest GEMM shape, with delta versus th
 
 ### A100 — CuTe
 
-| # | Kernel | Key Optimisation | % of cuBLAS | Δ |
-|---|--------|------------------|-------------|---|
-| cuBLAS | Reference | — | — | — |
-| 1 | v1 | Baseline | 16.9% | — |
-| 2 | v2 | + vector loads | 22.2% | +26% |
-| 3 | v3 | + SMEM padding | 50.5% | **+131%** |
-| 4 | v4 | + `Swizzle<3,3,3>` | 42.9% | −14% |
-| 5 | v5 | + `cp.async` CACHEALWAYS | 64.1% | **+48%** |
-| 6 | v6 | swizzle, single-stage | 68.0% | +5% |
-| 7 | v7 | + 2-stage smem, pipelined K-loop | 65.0% | −4% |
-| 8 | v8 | + 3-stage smem | 75.8% | **+16%** |
-| 9 | ptx_gemm | + inline PTX | **79.4%** | +7% |
+| # | Kernel | Key Optimisation | TFLOPS | % of cuBLAS | Δ |
+|---|--------|------------------|--------|-------------|---|
+| cuBLAS | Reference | 263.4 | — | — |
+| 1 | v1 | Baseline | 45.9 | 16.9% | — |
+| 2 | v2 | + vector loads | 58.4 | 22.2% | +26% |
+| 3 | v3 | + SMEM padding | 134.5 | 50.5% | **+131%** |
+| 4 | v4 | + `Swizzle<3,3,3>` | 115.3 | 42.9% | −14% |
+| 5 | v5 | + `cp.async` CACHEALWAYS | 170.8 | 64.1% | **+48%** |
+| 6 | v6 | swizzle, single-stage | 180.2 | 68.0% | +5% |
+| 7 | v7 | + 2-stage smem, pipelined K-loop | 172.9 | 65.0% | −4% |
+| 8 | v8 | + 3-stage smem | 200.4 | 75.8% | **+16%** |
+| 9 | ptx_gemm | + inline PTX | **211.0** | 79.4% | +7% |
 
 ### H100 — CuTe (WGMMA / TMA)
 
-| Kernel | Description | % of cuBLAS |
-|--------|-------------|-------------|
-| cuBLAS | Reference (16384³, bf16) | ~75% of peak |
-| matmul_v1 | Baseline WGMMA | ~49% |
-| matmul_v2 | WGMMA with prefetch | ~50% |
-| matmul_v3 | WGMMA with cluster sync | ~50% |
-| matmul_v4 | WGMMA with TMA barriers | ~50% |
+| Kernel | Description | TFLOPS | % of cuBLAS |
+|--------|-------------|--------|-------------|
+| cuBLAS | Reference (16384³, bf16) | ~741 | ~75% of peak |
+| matmul_v1 | Baseline WGMMA | 356.4 | ~49% |
+| matmul_v2 | WGMMA with prefetch | 365.8 | ~50% |
+| matmul_v3 | WGMMA with cluster sync | 365.6 | ~50% |
+| matmul_v4 | WGMMA with TMA barriers | 365.7 | ~50% |
 
 > **Baseline:** H100 cuBLAS at 16384×16384×16384, bf16 ≈ 741 TFLOPS (~75% of 988 TFLOPS peak). Kernel times: 24.0–24.7 ms.
 
 ### H100 — CuTe DSL
 
-| Kernel | % of cuBLAS |
-|--------|-------------|
-| cuBLAS | Reference (4096³, bf16) |
-| DSL v2 | ~88% |
+| Kernel | TFLOPS | % of cuBLAS |
+|--------|--------|-------------|
+| cuBLAS | 776.0 | — |
+| DSL v2 | 684.07 | ~88% |
 
 > **Baseline:** H100 cuBLAS at 4096×4096×4096, bf16 = 776.0 TFLOPS. DSL v2: 200.91 µs, 684.07 TFLOPS.
 
 ### B200 — CuTe DSL
 
-| Version | Kernel time (us) | % of cuBLAS | Speedup vs v1 |
-|---------|------------------|-------------|---------------|
-| cuBLAS | Reference (8192³, Float16) | — | — |
-| v1 | 2400.18 | 31% | 1.00x |
-| v2 | 1229.82 | 60% | 1.95x |
-| v3 | 762.88 | 97% | 3.15x |
-| v4 | 652.78 | 114% | 3.68x |
-| v5 | 597.49 | 125% | 4.02x |
-| v6 | 617.95 | 120% | 3.89x |
+| Version | Kernel time (us) | TFLOPS | % of cuBLAS | Speedup vs v1 |
+|---------|------------------|--------|-------------|---------------|
+| cuBLAS | Reference (8192³, Float16) | ~1478 | — | — |
+| v1 | 2400.18 | 458.10 | 31% | 1.00x |
+| v2 | 1229.82 | 894.04 | 60% | 1.95x |
+| v3 | 762.88 | 1441.26 | 97% | 3.15x |
+| v4 | 652.78 | 1684.34 | 114% | 3.68x |
+| v5 | 597.49 | 1840.22 | 125% | 4.02x |
+| v6 | 617.95 | 1779.28 | 120% | 3.89x |
 
 All B200 versions pass numerical verification against a PyTorch `einsum` reference.  
 **CuTe DSL v5 reaches ~125% of cuBLAS peak.**
