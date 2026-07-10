@@ -109,21 +109,6 @@ modal run scripts/cute/run.py::main --task kernels/cute/H100/matmul_v4.cu --gpu 
 
 ---
 
-## Key Takeaways
-
-| Optimisation | Impact |
-|-----------|--------|
-| Bank conflict fix (padding) | **+108%** CUDA, **+131%** CuTe |
-| Multi-stage + `ldmatrix.x4` | +43% |
-| `cp.async` CACHEALWAYS | +48% CuTe |
-| Hand-written PTX | +7% vs CuTe abstraction ceiling |
-| CuTe DSL (B200) 2-CTA + prefetch | 458 → 1840 TFLOPs (+302%) |
-| CuTe DSL (B200) warp specialization | v5 peak at 1840 TFLOPs |
-
-**Rule:** profile first. One constant (`kPad = 8`) can double throughput.
-
----
-
 ## Requirements
 
 - Python 3.12+
