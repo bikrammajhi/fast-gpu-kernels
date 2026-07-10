@@ -58,6 +58,16 @@ Each table shows peak TFLOPS at the largest GEMM and the delta versus the previo
 
 ### CuTe DSL kernels (H100 / B200)
 
+#### H100 80GB HBM3 (M=N=K=16384, bf16)
+
+| Kernel | Status | Duration | TFLOPS |
+|--------|--------|----------|--------|
+| DSL v2 | CORRECTNESS PASS | 200.91 µs | 684.07 |
+
+```bash
+modal run scripts/cute_dsl/run.py::main --task H100/matmul_v2.py --gpu H100
+```
+
 #### B200 (sm_100a, Blackwell) (M=N=K=8192, Float16)
 
 | Version | Kernel time (us) | Throughput (TFLOPs) | Speedup vs v1 |
