@@ -96,12 +96,12 @@ modal run scripts/cute_dsl/run.py::main --task B200/matmul_v6.py --gpu B200
 
 H100-specific CuTe kernels using WGMMA/TMA are located in `kernels/cute/H100/`:
 
-| Kernel | Description | Status |
-|--------|-------------|--------|
-| matmul_v1 | Baseline WGMMA | Implemented |
-| matmul_v2 | WGMMA with prefetch | Implemented |
-| matmul_v3 | WGMMA with cluster sync | Implemented |
-| matmul_v4 | WGMMA with TMA barriers | Implemented |
+| Kernel | Description | Status | Duration | TFLOPS |
+|--------|-------------|--------|----------|--------|
+| matmul_v1 | Baseline WGMMA | Implemented | 24.6800 ms | 356.4 |
+| matmul_v2 | WGMMA with prefetch | Implemented | 24.0442 ms | 365.8 |
+| matmul_v3 | WGMMA with cluster sync | Implemented | 24.0581 ms | 365.6 |
+| matmul_v4 | WGMMA with TMA barriers | Implemented | 24.0498 ms | 365.7 |
 
 ```bash
 modal run scripts/cute/run.py::main --task kernels/cute/H100/matmul_v4.cu --gpu H100
