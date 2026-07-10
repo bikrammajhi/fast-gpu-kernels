@@ -1,8 +1,5 @@
 /***************************************************************************************************
- * Copyright (c) 2024 - 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- * SPDX-License-Identifier: BSD-3-Clause
- *
- * Hopper WGMMA GEMM with TMA warp-specialization (CuTe C++ port of CuTe DSL c2_wgmma_tma_specialized_pipeline.py)
+ * Hopper WGMMA GEMM with TMA warp-specialization 
  *
  * WARP SPECIALIZATION:
  *   - Warps 0-3 (threads 0-127): MMA consumer (128 threads = 1 warp group)
