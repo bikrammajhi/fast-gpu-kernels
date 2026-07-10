@@ -1,15 +1,15 @@
 # fast-gpu-kernels
 
-Hand-optimized BF16 GEMM kernels for NVIDIA A100 / H100, benchmarked on Modal.
+Hand-optimized BF16 GEMM kernels for NVIDIA A100 / H100 / B200, benchmarked on Modal.
 
-**Hardware:** A100-SXM4-40GB | H100 (switch via `--gpu`)
-**Target:** M = N = K = 16384, bf16 | Peak: 312 TFLOPS (A100), 395 TFLOPS (Blackwell)
+**Hardware:** A100-SXM4-40GB | H100 80GB HBM3 | B200 (sm_100a, Blackwell)
+**Target:** M = N = K = 16384, bf16 | Peak: 312 TFLOPS (A100), ~988 TFLOPS (H100), ~1478 TFLOPS (B200)
 
 ---
 
 ## Benchmarks
 
-Each table shows peak TFLOPS at the largest GEMM (16384) and the delta versus the previous iteration.
+Each table shows peak TFLOPS at the largest GEMM and the delta versus the previous iteration.
 
 ### Hand-written CUDA kernels (A100)
 
@@ -56,6 +56,59 @@ Each table shows peak TFLOPS at the largest GEMM (16384) and the delta versus th
 
 ---
 
+### CuTe DSL kernels (H100 / B200)
+
+#### H100 80GB HBM3 (M=N=K=16384, bf16)
+
+| Kernel | Status | Duration | TFLOPS |
+|--------|--------|----------|--------|
+| v1 | PASS | 24.6800 ms | 356.4 |
+| v2 | PASS | 24.0442 ms | 365.8 |
+| v3 | PASS | 24.0581 ms | 365.6 |
+| v4 | PASS | 24.0498 ms | 365.7 |
+
+```bash
+modal run scripts/cute/run.py::main --task H100/matmul_v1.cu --gpu H100
+modal run scripts/cute/run.py::main --task H100/matmul_v4.cu --gpu H100
+```
+
+#### B200 (sm_100a, Blackwell) (M=N=K=8192, Float16)
+
+| Version | Kernel time (us) | Throughput (TFLOPs) | Speedup vs v1 |
+|---------|------------------|---------------------|---------------|
+| v1      | 2400.18          | 458.10              | 1.00x         |
+| v2      | 1229.82          | 894.04              | 1.95x         |
+| v3      | 762.88           | 1441.26             | 3.15x         |
+| v4      | 652.78           | 1684.34             | 3.68x         |
+| v5      | 597.49           | 1840.22             | 4.02x         |
+| v6      | 617.95           | 1779.28             | 3.89x         |
+
+All versions pass numerical verification against a PyTorch `einsum` reference.
+**CuTe DSL v5 reaches ~125% of cuBLAS peak (1840 vs 1478 TFLOPs).**
+
+```bash
+modal run scripts/cute_dsl/run.py::main --task B200/matmul_v6.py --gpu B200
+```
+
+---
+
+### CuTe kernels (H100)
+
+H100-specific CuTe kernels using WGMMA/TMA are located in `kernels/cute/H100/`:
+
+| Kernel | Description | Status |
+|--------|-------------|--------|
+| matmul_v1 | Baseline WGMMA | Implemented |
+| matmul_v2 | WGMMA with prefetch | Implemented |
+| matmul_v3 | WGMMA with cluster sync | Implemented |
+| matmul_v4 | WGMMA with TMA barriers | Implemented |
+
+```bash
+modal run scripts/cute/run.py::main --task kernels/cute/H100/matmul_v4.cu --gpu H100
+```
+
+---
+
 ## Key Takeaways
 
 | Optimisation | Impact |
@@ -64,6 +117,8 @@ Each table shows peak TFLOPS at the largest GEMM (16384) and the delta versus th
 | Multi-stage + `ldmatrix.x4` | +43% |
 | `cp.async` CACHEALWAYS | +48% CuTe |
 | Hand-written PTX | +7% vs CuTe abstraction ceiling |
+| CuTe DSL (B200) 2-CTA + prefetch | 458 → 1840 TFLOPs (+302%) |
+| CuTe DSL (B200) warp specialization | v5 peak at 1840 TFLOPs |
 
 **Rule:** profile first. One constant (`kPad = 8`) can double throughput.
 
@@ -73,7 +128,7 @@ Each table shows peak TFLOPS at the largest GEMM (16384) and the delta versus th
 
 - Python 3.12+
 - [Modal](https://modal.com) account + `modal setup`
-- Git for cloning cutlass
+- Git for cloning CUTLASS
 
 ## Setup
 
@@ -87,8 +142,9 @@ modal setup
 ## Run
 
 ```bash
-modal run scripts/run.py --task kernels/cuda/A100/benchmark.cu --gpu A100
-modal run scripts/run.py --task kernels/cute/H100/benchmark.cu --gpu H100
+modal run scripts/run.py::main --task kernels/cuda/A100/benchmark.cu --gpu A100
+modal run scripts/cute/run.py::main --task kernels/cute/A100/benchmark.cu --gpu A100
+modal run scripts/cute_dsl/run.py::main --task B200/matmul_v6.py --gpu B200
 ```
 
 ### GPU selection
