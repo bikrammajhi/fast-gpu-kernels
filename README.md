@@ -63,17 +63,33 @@ modal run scripts/cute/run.py::main --task kernels/cute/H100/matmul_v1.cu --gpu 
 
 ### H100 — CuTe DSL
 
-Problem: `M = N = K = 4096`, bf16
+Shapes: M = N = K in {128, 256, 512, 1K, 2K, 4K, 5K, 8K}, FP16
 
-| Kernel | TFLOPS | % of cuBLAS |
-|--------|--------|-------------|
-| cuBLAS | 776.0 | — |
-| DSL v2 | 684.07 | ~88% |
+| Shape | cuBLAS | K1 | K2 | K3 | K4 | K5 | K6 |
+|-------|--------|----|----|----|----|----|----|
+| 128 | 0.3 | 0.3 | 0.3 | 0.3 | 0.3 | 0.3 | 0.3 |
+| 512 | 20.1 | 20.2 | 17.7 | 20.6 | 21.3 | 15.9 | 18.1 |
+| 1K | 162.1 | 113.5 | 175.0 | 142.2 | 149.7 | 121.8 | 111.6 |
+| 4K | 755.0 | 501.7 | 542.2 | 578.6 | 573.5 | **674.9** | 655.5 |
+| 8K | 745.5 | 494.4 | 526.7 | 522.2 | 557.3 | 672.0 | **728.8** |
 
-> **Note:** DSL v2: 200.91 µs, 684.07 TFLOPS.
+**K6 reaches 98% of cuBLAS at 8192. K5 hits 89% at 4K.**
+
+| Kernel | Tile | Stages | Key Optimization |
+|--------|------|--------|------------------|
+| K1 | 128×128×128 | 1 | Single-CTA TMA + WGMMA baseline |
+| K2 | 128×128×128 | 3 | `PipelineTmaAsync` multi-stage pipeline |
+| K3 | 128×128×128 | 3+4 | TMA store epilogue with 4-stage pipeline |
+| K4 | 128×128×128 | 3+3 | Warp-specialized TMA producer / MMA consumer |
+| K5 | 128×256×64 | 4 | Asymmetric tile + 4-stage pipeline |
+| K6 | 128×256×64 | 4 | 2×1 TMA multicast cluster |
 
 ```bash
-modal run scripts/cute_dsl/run.py::main --task H100/matmul_v2.py --gpu H100
+# Benchmark all kernels
+modal run scripts/cute_dsl/run.py::main --task H100/scripts/benchmark_all.py --gpu H100
+
+# Generate charts
+python kernels/cute_dsl/H100/scripts/plot_results.py
 ```
 
 ### B200 — CuTe DSL
