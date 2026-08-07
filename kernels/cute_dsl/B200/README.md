@@ -58,6 +58,3 @@ Benefits:
 
 ### v4 → v5: Warp-specialized design
 Dedicated warps: TMA (ID 5), MMA (ID 4), Epilogue (IDs 0-3). Warps work in parallel, hiding DRAM latency.
-
-### v5 → v6: Code cleanup
-Cleaned version maintaining identical optimizations.
