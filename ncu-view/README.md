@@ -124,6 +124,15 @@ launches fall back to skip 1, then skip 0 (single-launch apps still
 profile). Tune with `--launch-skip N` / `--launch-count N` (`>1` averages
 `gpu__time_duration` over several steady-state launches).
 
+**Minimal launches by default.** ncu replays the *whole* app once per
+counter pass under `--set full`, so an app that launches its kernel 25 times
+(5 warm-up + 20 timed) multiplies every pass ~25x. `profile` therefore
+rewrites the driver's benchmark loop to the minimum — **1 warm-up + 1 timed
+launch** (`--app-iters 1 --app-warmup 1`) — cutting profile time ~linearly;
+clocks are locked by `--clock-control boost`, so fewer launches change no
+number. Pass `--app-iters 0` to profile the app's own launch counts
+unchanged.
+
 **Clock fairness.** ncu's own default is `--clock-control base`, which locks
 the GPU to its base clock during profiling — that understates steady-state
 throughput by ~30-45% (e.g. a kernel that does 1790 TF/s at boost reads
@@ -262,6 +271,11 @@ profile options
                           same report series (fair, same-clock baseline)
   --bench-precision P     baseline io dtype: fp16 | bf16 (default fp16; bf16
                           needs sm_80+)
+  --app-iters N           rewrite the driver's timed launch count to N
+                          (default 1 = minimal; 0 = app's own counts)
+  --app-warmup N          rewrite the driver's warm-up launch count
+                          (default 1; clocks are locked, warm-up is just
+                          launch selection)
   --no-modal              run ncu locally instead of on Modal
 ```
 

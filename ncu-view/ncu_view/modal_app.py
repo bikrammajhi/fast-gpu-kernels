@@ -103,7 +103,8 @@ def _run_ncu_sections(rep: str, run_id: str, cwd: str | None = None) -> dict[str
     return out
 
 
-def _cublas_bench_source(precision: str, shape: int) -> str:
+def _cublas_bench_source(precision: str, shape: int, iters: int = 5,
+                         warmup: int = 5) -> str:
     typ, cublas_t = (("half", "CUDA_R_16F") if precision == "fp16"
                      else ("__nv_bfloat16", "CUDA_R_16BF"))
     return f"""#include <cuda_runtime.h>
@@ -119,13 +120,13 @@ int main() {{
     cublasHandle_t h;
     cublasCreate(&h);
     {typ} alpha = 1, beta = 0;
-    for (int i = 0; i < 5; ++i)
+    for (int i = 0; i < {warmup}; ++i)
         cublasGemmEx(h, CUBLAS_OP_N, CUBLAS_OP_N, N, N, N,
                      &alpha, A, {cublas_t}, N, B, {cublas_t}, N,
                      &beta, C, {cublas_t}, N, CUDA_R_32F,
                      CUBLAS_GEMM_DEFAULT_TENSOR_OP);
     cudaDeviceSynchronize();
-    for (int i = 0; i < 20; ++i)
+    for (int i = 0; i < {iters}; ++i)
         cublasGemmEx(h, CUBLAS_OP_N, CUBLAS_OP_N, N, N, N,
                      &alpha, A, {cublas_t}, N, B, {cublas_t}, N,
                      &beta, C, {cublas_t}, N, CUDA_R_32F,
@@ -445,7 +446,9 @@ def profile_on_modal(source_dir: Path, run_cmd: str, run_id: str,
                      launch_skip: int = 10,
                      launch_count: int = 1,
                      clock_control: str = "boost",
-                     bench: dict | None = None) -> dict[str, bytes]:
+                     bench: dict | None = None,
+                     app_iters: int | None = None,
+                     app_warmup: int | None = None) -> dict[str, bytes]:
     """Run the profile on Modal and return {filename: bytes} artifacts."""
     fn = PROFILE_SOURCES.get(gpu, PROFILE_SOURCES["H100"])
     if gpu not in PROFILE_SOURCES:
@@ -462,9 +465,28 @@ def profile_on_modal(source_dir: Path, run_cmd: str, run_id: str,
         for p in sorted(source_dir.rglob("*")):
             if p.is_file():
                 files[str(p.relative_to(source_dir))] = p.read_bytes()
+    if app_iters is not None and app_iters > 0:
+        warmup = app_warmup if app_warmup is not None else 1
+        from .profile import _rewrite_launch_counts
+        rewritten = False
+        for rel in list(files):
+            if rel.endswith(".py"):
+                new = _rewrite_launch_counts(
+                    files[rel].decode(errors="replace"), app_iters, warmup)
+                if new != files[rel].decode(errors="replace"):
+                    files[rel] = new.encode()
+                    rewritten = True
+        if rewritten:
+            print(f"note: profiling {app_iters} timed launch(s), "
+                  f"{warmup} warm-up (app launch counts rewritten)")
+        else:
+            print("note: --app-iters has no effect here: no "
+                  "warmup_iterations=/iterations= kwargs in the driver; "
+                  "app keeps its own launches")
     if bench:
         files["ncu-view-cublas-bench.cu"] = _cublas_bench_source(
-            bench.get("precision", "fp16"), int(bench.get("shape", 8192))
+            bench.get("precision", "fp16"), int(bench.get("shape", 8192)),
+            int(bench.get("iters", 5)), int(bench.get("warmup", 5))
         ).encode()
     with app.run():
         return fn.remote(run_cmd, run_id, files, launch_skip, launch_count,

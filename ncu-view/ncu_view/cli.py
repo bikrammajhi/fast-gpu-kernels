@@ -159,6 +159,8 @@ def _run_profile(args: argparse.Namespace) -> int:
         compare_cublas=args.compare_cublas,
         bench_precision=args.bench_precision,
         bench_shape=args.M,
+        app_iters=args.app_iters,
+        app_warmup=args.app_warmup,
     )
 
 
@@ -226,6 +228,18 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--bench-precision", default="fp16", choices=("fp16", "bf16"),
                     help="profile: precision of the cuBLAS comparison GEMM, "
                          "matched to your kernel's io dtype (default fp16)")
+    ap.add_argument("--app-iters", type=int, default=1, metavar="N",
+                    help="profile: rewrite the app driver's timed launch "
+                         "count to N before profiling. ncu replays the whole "
+                         "app once per counter pass under --set full, so 25 "
+                         "launches x ~50 passes dominates the run; cutting "
+                         "launches cuts time ~linearly. Default 1 (minimal); "
+                         "pass 0 to keep the app's own counts")
+    ap.add_argument("--app-warmup", type=int, default=1, metavar="N",
+                    help="profile: rewrite the app driver's warm-up launch "
+                         "count to N (default 1: clocks are locked by "
+                         "--clock-control, so warm-up is just launch "
+                         "selection)")
     ap.add_argument("--no-modal", action="store_true",
                     help="profile: run ncu locally instead of on Modal")
     args = ap.parse_args(argv)
