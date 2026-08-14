@@ -94,14 +94,6 @@ def _cutlass_roots() -> list[Path]:
     return roots
 
 
-def _rewrite_launch_counts(text: str, iters: int, warmup: int) -> str:
-    """Rewrite a CuTe DSL driver's benchmark loop counts in place."""
-    import re
-    text = re.sub(r"warmup_iterations\s*=\s*\d+",
-                  f"warmup_iterations={warmup}", text)
-    return re.sub(r"\biterations\s*=\s*\d+", f"iterations={iters}", text)
-
-
 def _guess_run_cmd(src: Path) -> str:
     """Return the shell command that builds and runs the kernel."""
     if src.is_dir():
@@ -137,9 +129,7 @@ def run_profile(source: str, outdir: Path | None, build_cmd: str | None,
                 launch_skip: int = 10, launch_count: int = 1,
                 clock_control: str = "boost", compare_cublas: bool = False,
                 bench_precision: str = "fp16",
-                bench_shape: int | None = None,
-                app_iters: int | None = None,
-                app_warmup: int | None = None) -> int:
+                bench_shape: int | None = None) -> int:
     """Profile a source tree with ncu and write the report into outdir."""
     import subprocess
 
@@ -153,34 +143,7 @@ def run_profile(source: str, outdir: Path | None, build_cmd: str | None,
 
     run_cmd = build_cmd or _guess_run_cmd(src)
     bench = ({"precision": bench_precision,
-              "shape": bench_shape or 8192,
-              "iters": app_iters if app_iters else 5,
-              "warmup": app_warmup if app_warmup is not None
-              else (5 if app_iters == 0 else 1)}
-             if compare_cublas else None)
-    if app_iters is not None and app_iters > 0:
-        warmup = app_warmup if app_warmup is not None else 1
-        if not no_modal or (src.is_file() and src.suffix == ".py"):
-            if no_modal:
-                app_root = outdir / f"{run_id}-app"
-                app_root.mkdir(parents=True, exist_ok=True)
-                new = _rewrite_launch_counts(src.read_text(), app_iters,
-                                             warmup)
-                if new != src.read_text():
-                    (app_root / src.name).write_text(new)
-                    src = app_root
-                    print(f"note: profiling {app_iters} timed launch(s), "
-                          f"{warmup} warm-up (app launch counts rewritten)")
-                else:
-                    print("note: --app-iters has no effect here: no "
-                          "warmup_iterations=/iterations= kwargs in the "
-                          "driver; app keeps its own launches")
-            else:
-                print(f"note: profiling {app_iters} timed launch(s), "
-                      f"{warmup} warm-up (app launch counts rewritten)")
-        else:
-            print("note: --app-iters needs a single .py driver with "
-                  "--no-modal; profiling the app unchanged")
+              "shape": bench_shape or 8192} if compare_cublas else None)
 
     if no_modal:
         rep = outdir / f"{run_id}.ncu-rep"
@@ -203,8 +166,7 @@ def run_profile(source: str, outdir: Path | None, build_cmd: str | None,
             from .modal_app import _cublas_bench_source
             bench_src = outdir / "ncu-view-cublas-bench.cu"
             bench_src.write_text(_cublas_bench_source(
-                bench["precision"], bench["shape"], bench["iters"],
-                bench["warmup"]))
+                bench["precision"], bench["shape"]))
             bench_bin = outdir / "ncu-view-cublas-bench"
             subprocess.run(["nvcc", "-arch=native", "-O3", "-lcublas",
                             "-o", str(bench_bin), str(bench_src)],
@@ -230,7 +192,7 @@ def run_profile(source: str, outdir: Path | None, build_cmd: str | None,
                              "pip install modal") from None
         artifacts = profile_on_modal(src, run_cmd, run_id, modal_gpu, timeout,
                                      launch_skip, launch_count, clock_control,
-                                     bench, app_iters, app_warmup)
+                                     bench)
         if artifacts.get("error"):
             raise SystemExit(artifacts["error"])
         for name, data in artifacts.items():

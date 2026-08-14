@@ -1,5 +1,4 @@
 import argparse
-import os
 from typing import Tuple
 
 import cutlass
@@ -366,19 +365,20 @@ def host_function(
     )
 
 
-# ==============================================================================
-# Main Benchmark
-# ==============================================================================
-def main():
+def run_dense_gemm(
+    mnk: Tuple[int, int, int],
+    tolerance: float,
+):
     global torch, cutlass_torch
     import torch
     import cutlass.torch as cutlass_torch
-    
-    m = n = k = int(os.environ.get("GEMM_SHAPE", "8192"))
+
+    m, n, k = mnk
     torch.manual_seed(1111)
 
-    def make_tensors(mn, k_dim, dtype):
-        shape = (mn, k_dim)
+    # Make K-major tensors (torch tensors are row-major)
+    def make_tensors(mn, k, dtype):
+        shape = (mn, k)
         return (
             torch.empty(*shape, dtype=torch.int32)
             .random_(-2, 2)
@@ -388,7 +388,6 @@ def main():
     a = make_tensors(m, k, cutlass_torch.dtype(io_dtype))
     b = make_tensors(n, k, cutlass_torch.dtype(io_dtype))
     c = make_tensors(m, n, cutlass_torch.dtype(io_dtype))
-    
     a_tensor = (
         from_dlpack(a, assumed_align=32)
         .mark_layout_dynamic(leading_dim=1)
@@ -405,20 +404,28 @@ def main():
         .mark_compact_shape_dynamic(mode=1, divisibility=n)
     )
 
-    compiled_kernel = cute.compile(host_function, a_tensor, b_tensor, c_tensor)
+    # Compile once
+    compiled_kernel = cute.compile(
+        host_function,
+        a_tensor,
+        b_tensor,
+        c_tensor,
+    )
 
+    # Benchmark the kernel using cute.testing.benchmark like v3
     avg_time_us = cute.testing.benchmark(
         compiled_kernel,
         kernel_arguments=cute.testing.JitArguments(a_tensor, b_tensor, c_tensor),
-        warmup_iterations=5,
-        iterations=20,
+        warmup_iterations=1,
+        iterations=2,
     )
 
+    # Calculate metrics
     total_float_ops = m * n * k * 2
     achieved_tflops = total_float_ops / (avg_time_us * 1000000)
 
-    print("Problem Size")
-    print("------------")
+    print(f"Problem Size")
+    print(f"------------")
     print(f"  M x N x K        : {m} x {n} x {k}")
     print(f"  A ({a.shape})  [{a.dtype}]")
     print(f"  B ({b.shape})  [{b.dtype}]")
@@ -426,19 +433,55 @@ def main():
     print(f"  IO dtype        : {io_dtype}")
     print(f"  Accum dtype     : {acc_dtype}")
     print()
-    print("Performance")
-    print("----------")
+    print(f"Performance")
+    print(f"----------")
     print(f"  Kernel time     : {avg_time_us:.4f} us")
     print(f"  Throughput      : {achieved_tflops:.2f} TFLOPs")
     print(f"BENCH_RESULT m={m} n={n} k={k} tflops={achieved_tflops:.2f} time_us={avg_time_us:.4f}")
     print()
 
+    # Compute reference result and verify
     ref = (torch.einsum("mk,nk->mn", a.to(torch.float32), b.to(torch.float32))).cpu()
     torch.testing.assert_close(
-        c.cpu(), ref.to(cutlass_torch.dtype(io_dtype)), atol=1e-1, rtol=1e-05
+        c.cpu(), ref.to(cutlass_torch.dtype(io_dtype)), atol=tolerance, rtol=1e-05
     )
-    print("PASS")
 
 
 if __name__ == "__main__":
-    main()
+
+    def parse_comma_separated_ints(s: str):
+        try:
+            return [int(x.strip()) for x in s.split(",")]
+        except ValueError:
+            raise argparse.ArgumentTypeError(
+                "Invalid format. Expected comma-separated integers."
+            )
+
+    from cuda.bindings import driver as cu_driver
+
+    cu_driver.cuInit(0)
+    err, device_count = cu_driver.cuDeviceGetCount()
+    if err != cu_driver.CUresult.CUDA_SUCCESS or device_count < 1:
+        raise RuntimeError("A GPU is required to run this example")
+
+    parser = argparse.ArgumentParser(description="Blackwell fp16 GEMM example 1")
+    parser.add_argument(
+        "--mnk",
+        type=parse_comma_separated_ints,
+        default=[8192, 8192, 8192],
+        help="MNK dimensions (comma-separated)",
+    )
+    parser.add_argument(
+        "--tolerance", type=float, default=1e-01, help="Tolerance for validation"
+    )
+    args = parser.parse_args()
+    if len(args.mnk) != 3:
+        parser.error("--mnk must contain exactly 3 values")
+    if args.mnk[0] % mma_tiler_mnk[0] != 0 or args.mnk[1] % mma_tiler_mnk[1] != 0:
+        parser.error("m n must be divisible by mma_tiler_mn")
+
+    run_dense_gemm(
+        args.mnk,
+        args.tolerance,
+    )
+    print("PASS")

@@ -8,7 +8,6 @@ import cutlass.pipeline as pipeline
 from cutlass.cute.nvgpu import cpasync, tcgen05
 import cutlass.utils.blackwell_helpers as sm100_utils
 from cutlass.cute.runtime import from_dlpack
-import os
 import sys
 
 io_dtype = cutlass.Float16
@@ -21,7 +20,7 @@ threads_per_cta = 128
 ab_stages = 4
 acc_stages = 1
 
-m = n = k = int(os.environ.get("GEMM_SHAPE", "8192"))
+m, n, k = (8192, 8192, 8192)
 
 # Make K-major tensors (torch tensors are row-major)
 def make_tensors(mn, k, dtype):

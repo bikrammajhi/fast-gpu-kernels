@@ -57,31 +57,20 @@ image = (
         "nvidia/cuda:13.0.1-cudnn-devel-ubuntu24.04",
         add_python="3.12",
     )
-    .apt_install("git", "cuda-nsight-compute-13-0")
+    .apt_install("git")
     .pip_install("rich")
     .pip_install("torch", index_url="https://download.pytorch.org/whl/cu130")
     .pip_install("nvidia-cutlass-dsl[cu13]")
-    .pip_install("trace-util")
-    .pip_install("ncu-report")
     .add_local_dir(str(Path(__file__).resolve().parent.parent.parent / "kernels"), remote_path="/root/gpulab/kernels")
-    .add_local_dir(str(Path(__file__).resolve().parent.parent.parent / "ncu-view"), remote_path="/root/gpulab/ncu-view")
 )
 
 app = modal.App(f"gpulab-{KERNEL_TYPE}", image=image)
 
-VOLUME = modal.Volume.from_name("gpulab-cute-dsl-traces", create_if_missing=True)
 
-
-try:
-    HF_SECRET = modal.Secret.from_name("hf-bucket-write")
-except modal.exception.NotFoundError:
-    HF_SECRET = modal.Secret.from_name("huggingface-secret")
-
-
-@app.cls(gpu=GPU_FALLBACK, timeout=3600, secrets=[HF_SECRET], volumes={"/root/gpulab/out": VOLUME})
+@app.cls(gpu=GPU_FALLBACK, timeout=3600)
 class Runner:
     @modal.method()
-    def run(self, task: str, gpu: str = GPU_FALLBACK, args: str = "", hf_token: str = ""):
+    def run(self, task: str, gpu: str = GPU_FALLBACK, args: str = ""):
         src = os.path.join(ROOT, "kernels", KERNEL_TYPE, task)
         if not src.endswith(".py"):
             raise ValueError(f"{KERNEL_TYPE} runner only supports .py tasks")
@@ -94,22 +83,18 @@ class Runner:
         env = os.environ.copy()
         # FIX: Dynamically set the architecture based on the resolved GPU
         env["CUTE_DSL_ARCH"] = get_cute_dsl_arch(gpu)
-        # Optional HF token for trace-util bucket uploads (B200 profiling)
-        if hf_token:
-            env["HF_TOKEN"] = hf_token
 
         console.log(f"[dim]run python[/dim]  {src} [dim]({gpu} -> {env['CUTE_DSL_ARCH']})[/dim]")
         cmd = ["python3", src] + (args.split() if args else [])
         out = subprocess.run(cmd, capture_output=True, text=True, env=env)
         if out.returncode != 0:
-            console.print(Panel(out.stdout, title=f"[bold red]{task} stdout[/bold red]", border_style="red"))
-            console.print(Panel(out.stderr, title=f"[bold red]{task} stderr[/bold red]", border_style="red"))
+            console.print(Panel(out.stderr, title="[bold red]Error[/bold red]", border_style="red"))
             raise RuntimeError(f"runtime error:\n{out.stderr}")
         console.print(Panel(out.stdout, title=f"[green]{task}[/green] on [bold]{gpu}[/bold]", border_style="green"))
         return out.stdout
 
 
 @app.local_entrypoint()
-def main(task: str, gpu: str = None, args: str = "", hf_token: str = ""):
+def main(task: str, gpu: str = None, args: str = ""):
     resolved_gpu = resolve_gpu(task, gpu)
-    return Runner.with_options(gpu=resolved_gpu)().run.remote(task, resolved_gpu, args, hf_token)
+    Runner.with_options(gpu=resolved_gpu)().run.remote(task, resolved_gpu, args)

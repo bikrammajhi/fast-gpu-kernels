@@ -15,6 +15,81 @@ from cutlass.pipeline import PipelineTmaAsync, CooperativeGroup, Agent, make_pip
 import cutlass.utils.hopper_helpers as sm90_utils
 import cutlass.utils as utils
 
+"""
+    HOW IMPLICIT MULTISTAGE PIPELINING WORKS IN HOPPER WITH CUTE
+    ============================================================
+
+    It feels counterintuitive because in older GPU architectures (and older CUTLASS versions), 
+    "multistage" meant you had to manually write complex, unrolled software pipelines: explicitly 
+    loading stage 0, stage 1, stage 2, and then computing stage 0 while loading stage 3.
+
+    In Hopper with CuTe, the prefetching is implicit and handled by the hardware and warp 
+    specialization. You don't need to manually unroll the loops because the hardware does the 
+    overlapping for you.
+
+    Here is exactly how it achieves multistage pipelining without explicit prefetch loops:
+
+    1. The Magic of `PipelineTmaAsync` and `num_stages`
+    ---------------------------------------------------
+    When you set `num_stages=4`, CuTe doesn't just allocate 4 chunks of Shared Memory (SMEM). 
+    It allocates 4 hardware barriers (mbarriers) in SMEM. Think of these 4 stages as a circular 
+    buffer queue with 4 slots.
+
+    2. Warp Specialization creates the Overlap
+    ------------------------------------------
+    Because you split the work into a TMA Warp (Producer) and MMA Warps (Consumer), they run 
+    concurrently on different physical hardware warps. 
+    - The TMA warp is just issuing memory loads.
+    - The MMA warps are just doing math.
+
+    3. How the "Implicit Prefetching" actually works
+    ------------------------------------------------
+    Let's trace the execution to see the prefetching in action:
+
+    Phase 1: The TMA Warp runs ahead (Prefetching)
+    The TMA warp enters its simple `for` loop. It is much faster at issuing loads than the MMA 
+    warps are at doing math.
+    1. It calls `producer_acquire()` for Stage 0 (Empty, passes). Issues TMA load for Stage 0. 
+    Calls `producer_commit()`.
+    2. It calls `producer_acquire()` for Stage 1 (Empty, passes). Issues TMA load for Stage 1. 
+    Calls `producer_commit()`.
+    3. It does the same for Stage 2 and Stage 3.
+    -> At this point, 4 stages are in flight. The SMEM is full of data.
+
+    Phase 2: The Pipeline Chokes (Backpressure)
+    4. The TMA warp loops back and calls `producer_acquire()` for Stage 4 (which maps back to 
+    Stage 0's buffer). 
+    5. CRITICAL: Because the MMA warps haven't consumed Stage 0 yet, Stage 0's hardware barrier 
+    is still "locked". `producer_acquire()` blocks the TMA warp. The TMA warp goes to sleep. 
+    -> This is the prefetch depth limit. The TMA warp has successfully prefetched 4 stages ahead 
+    and is now waiting.
+
+    Phase 3: The MMA Warps catch up and free the buffer
+    Meanwhile, the MMA warps were waiting on Stage 0.
+    1. The TMA load for Stage 0 finishes. The hardware barrier automatically wakes up the MMA warps.
+    2. The MMA warps compute Stage 0 (`cute.gemm`).
+    3. They finish, and call `consumer_release()`. This unlocks Stage 0's barrier.
+    4. The MMA warps move to Stage 1.
+
+    Phase 4: The Steady State (Overlap)
+    1. The moment Stage 0's barrier is unlocked, the sleeping TMA warp wakes up, passes 
+    `producer_acquire()`, and issues the TMA load for Stage 4 into Stage 0's buffer.
+    2. The TMA warp moves to Stage 5, but blocks again because Stage 1 is still being computed.
+    3. The MMA warps finish Stage 1, unlock it, and the TMA warp loads Stage 5 into it.
+
+    SUMMARY
+    -------
+    You don't see explicit prefetching because the TMA warp's simple `for` loop IS the prefetcher. 
+
+    By giving it `num_stages=4` buffers and letting it run concurrently with the compute warps, 
+    it naturally runs 4 steps ahead of the compute. The `producer_acquire` and `consumer_wait` 
+    barriers act as the automatic traffic lights that keep them perfectly synchronized without 
+    you having to manually write `prologue()`, `mainloop()`, and `epilogue()` unrolled loops. 
+
+    That is the beauty of Hopper's asynchronous pipelines: the hardware scheduler handles the 
+    software pipelining for you.
+"""
+
 @dataclass
 class GemmConfig:
     """Configuration for a single-CTA Hopper GEMM with warp-specialized TMA + WGMMA."""

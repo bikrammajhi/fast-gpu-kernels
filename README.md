@@ -109,11 +109,6 @@ Problem: `M = N = K = 8192`, bf16
 All B200 versions pass numerical verification against a PyTorch `einsum` reference.  
 **CuTe DSL v5 reaches ~125% of cuBLAS peak.**
 
-> **Perfetto traces** for every B200 version (v1–v6 + cuBLAS) live in the
-> `iiserkbikram/cute-dsl-b200` Hugging Face bucket — one click per version, with
-> the per-launch kernel time / SMEM / register evidence behind each optimization
-> step. See `kernels/cute_dsl/B200/README.md#profiling-traces`.
-
 ## Optimizations
 
 ### H100 — Key Techniques
