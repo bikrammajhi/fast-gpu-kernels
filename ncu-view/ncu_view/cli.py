@@ -153,6 +153,8 @@ def _run_profile(args: argparse.Namespace) -> int:
         timeout=args.timeout,
         no_modal=args.no_modal,
         modal_gpu=args.modal_gpu,
+        launch_skip=args.launch_skip,
+        launch_count=args.launch_count,
     )
 
 
@@ -196,6 +198,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--modal-gpu", default="H100", metavar="ACCELERATOR",
                     help="profile: Modal accelerator, e.g. H100, B200 "
                          "(default H100)")
+    ap.add_argument("--launch-skip", type=int, default=10, metavar="N",
+                    help="profile: ncu launch skip, landing the capture past "
+                         "the app's warm-up so clocks are at boost; falls "
+                         "back to 1 then 0 for apps with few launches "
+                         "(default 10)")
+    ap.add_argument("--launch-count", type=int, default=1, metavar="N",
+                    help="profile: ncu launches to capture; >1 averages "
+                         "gpu__time_duration over steady-state launches "
+                         "(default 1)")
     ap.add_argument("--no-modal", action="store_true",
                     help="profile: run ncu locally instead of on Modal")
     args = ap.parse_args(argv)

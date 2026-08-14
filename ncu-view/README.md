@@ -117,9 +117,12 @@ latest-tag clone (`/opt/cutlass`), with both `-I .../include` and
 `-I .../tools/util/include` (the `util` helpers — `print_error.hpp`,
 `GPU_Clock.hpp` — live under `tools/util` in 3.x and 4.x alike).
 
-Profiling skips the first kernel launch (the CuTe DSL's `__nvcc_device_query`
-pollutes the trace) and profiles one real kernel; apps that launch a single
-kernel are retried without the skip.
+Profiling skips past the app's own warm-up loop (`--launch-skip 10` by
+default) so the kernel is timed with the GPU clocks at boost — a cold single
+launch reads ~1.5x slower than steady state on data-center parts. Apps with
+fewer launches fall back to skip 1, then skip 0 (single-launch apps still
+profile). Tune with `--launch-skip N` / `--launch-count N` (`>1` averages
+`gpu__time_duration` over several steady-state launches).
 
 ## Inputs
 

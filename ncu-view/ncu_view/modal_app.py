@@ -104,8 +104,16 @@ def _run_ncu_sections(rep: str, run_id: str, cwd: str | None = None) -> dict[str
 
 
 def _profile_source_body(run_cmd: str, run_id: str,
-                         files: dict[str, bytes]) -> dict[str, bytes]:
-    """Run `run_cmd` under ncu (full set), then re-export raw CSV + sections."""
+                         files: dict[str, bytes],
+                         launch_skip: int = 10,
+                         launch_count: int = 1) -> dict[str, bytes]:
+    """Run `run_cmd` under ncu (full set), then re-export raw CSV + sections.
+
+    `launch_skip` lands the capture past the app's own warm-up loop so the
+    GPU clocks are at boost when ncu times the kernel (a cold single launch
+    reads ~1.5x slower than steady state on data-center parts). Cascades:
+    (skip,count) → (1,1) → (0,1) so single-launch apps still profile.
+    """
     subprocess.run(["mkdir", "-p", REMOTE_SRC], check=True)
     for rel, data in files.items():
         p = Path(REMOTE_SRC) / rel
@@ -128,22 +136,26 @@ def _profile_source_body(run_cmd: str, run_id: str,
         if dsl_arch and os.environ.get("CUTE_DSL_ARCH") is None:
             env = {**os.environ, "CUTE_DSL_ARCH": dsl_arch}
     run_cmd = _rewrite_cutlass_include(run_cmd)
-    ncu = subprocess.run(["ncu", "--set", "full", "--launch-skip", "1",
-                          "--launch-count", "1", "-o", rep, "sh", "-c",
-                          run_cmd], cwd=REMOTE_SRC, env=env,
-                         capture_output=True)
+
+    def _capture(skip: int, count: int):
+        return subprocess.run(["ncu", "--set", "full", "--launch-skip",
+                               str(skip), "--launch-count", str(count), "-o",
+                               rep, "sh", "-c", run_cmd],
+                              cwd=REMOTE_SRC, env=env, capture_output=True)
+
+    ncu = _capture(launch_skip, launch_count)
     if ncu.returncode != 0:
         return {"error": f"ncu rc={ncu.returncode}\n"
                          f"{ncu.stdout.decode(errors='replace')[-4000:]}\n"
                          f"{ncu.stderr.decode(errors='replace')[-4000:]}"}
     if not os.path.exists(rep):
-        ncu = subprocess.run(["ncu", "--set", "full", "--launch-count", "1",
-                              "-o", rep, "sh", "-c", run_cmd],
-                             cwd=REMOTE_SRC, env=env, capture_output=True)
-        if ncu.returncode != 0 or not os.path.exists(rep):
-            return {"error": f"ncu (retry, no skip) rc={ncu.returncode}\n"
-                             f"{ncu.stdout.decode(errors='replace')[-4000:]}\n"
-                             f"{ncu.stderr.decode(errors='replace')[-4000:]}"}
+        ncu = _capture(1, 1)
+    if not os.path.exists(rep):
+        ncu = _capture(0, 1)
+    if ncu.returncode != 0 or not os.path.exists(rep):
+        return {"error": f"ncu (launch selection) rc={ncu.returncode}\n"
+                         f"{ncu.stdout.decode(errors='replace')[-4000:]}\n"
+                         f"{ncu.stderr.decode(errors='replace')[-4000:]}"}
     raw = subprocess.run(["ncu", "--import", rep, "--page", "raw", "--csv"],
                          cwd=REMOTE_SRC, capture_output=True)
     if raw.returncode != 0:
@@ -163,80 +175,119 @@ def _profile_source_body(run_cmd: str, run_id: str,
 
 @app.function(image=image, gpu="T4", timeout=3600)
 def _profile_source_t4(run_cmd: str, run_id: str,
-                       files: dict[str, bytes]) -> dict[str, bytes]:
-    return _profile_source_body(run_cmd, run_id, files)
+                       files: dict[str, bytes],
+                         launch_skip: int = 10,
+                         launch_count: int = 1) -> dict[str, bytes]:
+    return _profile_source_body(run_cmd, run_id, files, launch_skip,
+                                launch_count)
 
 
 @app.function(image=image, gpu="L4", timeout=3600)
 def _profile_source_l4(run_cmd: str, run_id: str,
-                       files: dict[str, bytes]) -> dict[str, bytes]:
-    return _profile_source_body(run_cmd, run_id, files)
+                       files: dict[str, bytes],
+                         launch_skip: int = 10,
+                         launch_count: int = 1) -> dict[str, bytes]:
+    return _profile_source_body(run_cmd, run_id, files, launch_skip,
+                                launch_count)
 
 
 @app.function(image=image, gpu="A10", timeout=3600)
 def _profile_source_a10(run_cmd: str, run_id: str,
-                        files: dict[str, bytes]) -> dict[str, bytes]:
-    return _profile_source_body(run_cmd, run_id, files)
+                        files: dict[str, bytes],
+                         launch_skip: int = 10,
+                         launch_count: int = 1) -> dict[str, bytes]:
+    return _profile_source_body(run_cmd, run_id, files, launch_skip,
+                                launch_count)
 
 
 @app.function(image=image, gpu="L40S", timeout=3600)
 def _profile_source_l40s(run_cmd: str, run_id: str,
-                         files: dict[str, bytes]) -> dict[str, bytes]:
-    return _profile_source_body(run_cmd, run_id, files)
+                         files: dict[str, bytes],
+                         launch_skip: int = 10,
+                         launch_count: int = 1) -> dict[str, bytes]:
+    return _profile_source_body(run_cmd, run_id, files, launch_skip,
+                                launch_count)
 
 
 @app.function(image=image, gpu="A100", timeout=3600)
 def _profile_source_a100(run_cmd: str, run_id: str,
-                         files: dict[str, bytes]) -> dict[str, bytes]:
-    return _profile_source_body(run_cmd, run_id, files)
+                         files: dict[str, bytes],
+                         launch_skip: int = 10,
+                         launch_count: int = 1) -> dict[str, bytes]:
+    return _profile_source_body(run_cmd, run_id, files, launch_skip,
+                                launch_count)
 
 
 @app.function(image=image, gpu="A100-40GB", timeout=3600)
 def _profile_source_a100_40gb(run_cmd: str, run_id: str,
-                              files: dict[str, bytes]) -> dict[str, bytes]:
-    return _profile_source_body(run_cmd, run_id, files)
+                              files: dict[str, bytes],
+                         launch_skip: int = 10,
+                         launch_count: int = 1) -> dict[str, bytes]:
+    return _profile_source_body(run_cmd, run_id, files, launch_skip,
+                                launch_count)
 
 
 @app.function(image=image, gpu="A100-80GB", timeout=3600)
 def _profile_source_a100_80gb(run_cmd: str, run_id: str,
-                              files: dict[str, bytes]) -> dict[str, bytes]:
-    return _profile_source_body(run_cmd, run_id, files)
+                              files: dict[str, bytes],
+                         launch_skip: int = 10,
+                         launch_count: int = 1) -> dict[str, bytes]:
+    return _profile_source_body(run_cmd, run_id, files, launch_skip,
+                                launch_count)
 
 
 @app.function(image=image, gpu="RTX-PRO-6000", timeout=3600)
 def _profile_source_rtx_pro_6000(run_cmd: str, run_id: str,
-                                 files: dict[str, bytes]) -> dict[str, bytes]:
-    return _profile_source_body(run_cmd, run_id, files)
+                                 files: dict[str, bytes],
+                         launch_skip: int = 10,
+                         launch_count: int = 1) -> dict[str, bytes]:
+    return _profile_source_body(run_cmd, run_id, files, launch_skip,
+                                launch_count)
 
 
 @app.function(image=image, gpu="H100", timeout=3600)
 def _profile_source_h100(run_cmd: str, run_id: str,
-                         files: dict[str, bytes]) -> dict[str, bytes]:
-    return _profile_source_body(run_cmd, run_id, files)
+                         files: dict[str, bytes],
+                         launch_skip: int = 10,
+                         launch_count: int = 1) -> dict[str, bytes]:
+    return _profile_source_body(run_cmd, run_id, files, launch_skip,
+                                launch_count)
 
 
 @app.function(image=image, gpu="H200", timeout=3600)
 def _profile_source_h200(run_cmd: str, run_id: str,
-                         files: dict[str, bytes]) -> dict[str, bytes]:
-    return _profile_source_body(run_cmd, run_id, files)
+                         files: dict[str, bytes],
+                         launch_skip: int = 10,
+                         launch_count: int = 1) -> dict[str, bytes]:
+    return _profile_source_body(run_cmd, run_id, files, launch_skip,
+                                launch_count)
 
 
 @app.function(image=image, gpu="B200", timeout=3600)
 def _profile_source_b200(run_cmd: str, run_id: str,
-                         files: dict[str, bytes]) -> dict[str, bytes]:
-    return _profile_source_body(run_cmd, run_id, files)
+                         files: dict[str, bytes],
+                         launch_skip: int = 10,
+                         launch_count: int = 1) -> dict[str, bytes]:
+    return _profile_source_body(run_cmd, run_id, files, launch_skip,
+                                launch_count)
 
 
 @app.function(image=image, gpu="B200+", timeout=3600)
 def _profile_source_b200p(run_cmd: str, run_id: str,
-                          files: dict[str, bytes]) -> dict[str, bytes]:
-    return _profile_source_body(run_cmd, run_id, files)
+                          files: dict[str, bytes],
+                         launch_skip: int = 10,
+                         launch_count: int = 1) -> dict[str, bytes]:
+    return _profile_source_body(run_cmd, run_id, files, launch_skip,
+                                launch_count)
 
 
 @app.function(image=image, gpu="B300", timeout=3600)
 def _profile_source_b300(run_cmd: str, run_id: str,
-                         files: dict[str, bytes]) -> dict[str, bytes]:
-    return _profile_source_body(run_cmd, run_id, files)
+                         files: dict[str, bytes],
+                         launch_skip: int = 10,
+                         launch_count: int = 1) -> dict[str, bytes]:
+    return _profile_source_body(run_cmd, run_id, files, launch_skip,
+                                launch_count)
 
 
 PROFILE_SOURCES = {
@@ -285,7 +336,9 @@ def extract_sections(rep_key: str, run_id: str,
 
 
 def profile_on_modal(source_dir: Path, run_cmd: str, run_id: str,
-                     gpu: str, timeout: int) -> dict[str, bytes]:
+                     gpu: str, timeout: int,
+                     launch_skip: int = 10,
+                     launch_count: int = 1) -> dict[str, bytes]:
     """Run the profile on Modal and return {filename: bytes} artifacts."""
     fn = PROFILE_SOURCES.get(gpu, PROFILE_SOURCES["H100"])
     if gpu not in PROFILE_SOURCES:
@@ -303,4 +356,4 @@ def profile_on_modal(source_dir: Path, run_cmd: str, run_id: str,
             if p.is_file():
                 files[str(p.relative_to(source_dir))] = p.read_bytes()
     with app.run():
-        return fn.remote(run_cmd, run_id, files)
+        return fn.remote(run_cmd, run_id, files, launch_skip, launch_count)

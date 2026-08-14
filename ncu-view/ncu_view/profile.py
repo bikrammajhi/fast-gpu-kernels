@@ -125,7 +125,8 @@ def _guess_run_cmd(src: Path) -> str:
 
 def run_profile(source: str, outdir: Path | None, build_cmd: str | None,
                 timeout: int, no_modal: bool,
-                modal_gpu: str = "H100") -> int:
+                modal_gpu: str = "H100",
+                launch_skip: int = 10, launch_count: int = 1) -> int:
     """Profile a source tree with ncu and write the report into outdir."""
     import subprocess
 
@@ -144,8 +145,9 @@ def run_profile(source: str, outdir: Path | None, build_cmd: str | None,
         csv = outdir / f"{run_id}.raw.csv"
         cwd = src if src.is_dir() else src.parent
         try:
-            subprocess.run(["ncu", "--set", "full", "--launch-skip", "1",
-                            "--launch-count", "1", "-o", str(rep), "sh", "-c",
+            subprocess.run(["ncu", "--set", "full", "--launch-skip",
+                            str(launch_skip), "--launch-count",
+                            str(launch_count), "-o", str(rep), "sh", "-c",
                             run_cmd], cwd=cwd, check=True)
         except FileNotFoundError:
             raise SystemExit("ncu not found on PATH: install Nsight Compute, "
@@ -160,7 +162,8 @@ def run_profile(source: str, outdir: Path | None, build_cmd: str | None,
         except ImportError:
             raise SystemExit("the profile command needs the modal package: "
                              "pip install modal") from None
-        artifacts = profile_on_modal(src, run_cmd, run_id, modal_gpu, timeout)
+        artifacts = profile_on_modal(src, run_cmd, run_id, modal_gpu, timeout,
+                                     launch_skip, launch_count)
         if artifacts.get("error"):
             raise SystemExit(artifacts["error"])
         for name, data in artifacts.items():
