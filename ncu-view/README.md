@@ -118,11 +118,29 @@ latest-tag clone (`/opt/cutlass`), with both `-I .../include` and
 `GPU_Clock.hpp` — live under `tools/util` in 3.x and 4.x alike).
 
 Profiling skips past the app's own warm-up loop (`--launch-skip 10` by
-default) so the kernel is timed with the GPU clocks at boost — a cold single
-launch reads ~1.5x slower than steady state on data-center parts. Apps with
-fewer launches fall back to skip 1, then skip 0 (single-launch apps still
+default) so steady-state launches are timed — a cold single launch reads
+~1.5x slower than steady state on data-center parts. Apps with fewer
+launches fall back to skip 1, then skip 0 (single-launch apps still
 profile). Tune with `--launch-skip N` / `--launch-count N` (`>1` averages
 `gpu__time_duration` over several steady-state launches).
+
+**Clock fairness.** ncu's own default is `--clock-control base`, which locks
+the GPU to its base clock during profiling — that understates steady-state
+throughput by ~30-45% (e.g. a kernel that does 1790 TF/s at boost reads
+~1215 TF/s at base). `ncu-view profile` therefore defaults to
+`--clock-control boost` (the reproducible peak number reviewers expect); use
+`--clock-control none` to let the app's own warm-up drive clocks, or `base`
+to reproduce vanilla ncu. If the host refuses `boost`, the run retries at
+`none` and the report's console notes it. Every kernel's measured SM clock
+(`sm__cycles_elapsed / gpu__time_duration`) is shown on its stat strip, so
+each TFLOPS is self-documenting.
+
+**Fair cuBLAS baseline.** `--compare-cublas` additionally profiles a cuBLAS
+`cublasGemmEx` GEMM in the same run, under identical `--clock-control`,
+`--launch-skip`/`--launch-count` and shape (`--M`, default 8192) — both land
+in the same report series and TFLOPS chart, so your kernel and cuBLAS are
+compared at the same clock. `--bench-precision fp16|bf16` matches the
+baseline's io dtype to your kernel (default fp16).
 
 ## Inputs
 

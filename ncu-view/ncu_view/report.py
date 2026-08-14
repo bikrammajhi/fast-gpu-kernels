@@ -53,12 +53,15 @@ def _kernel_dict(kp: KernelProfile, rules: list[RuleResult],
     pipe = m.get("sm__pipe_tensor_cycles_active.avg.pct_of_peak_sustained_active")
     dram_bps = m.get("dram__bytes.sum.per_second")
     occ = m.get("sm__warps_active.avg.pct_of_peak_sustained_active")
+    cycles = m.get("sm__cycles_elapsed.avg")
+    clock_ghz = cycles / t if (cycles and t) else None
     tflops = 2.0 * cfg["M"] ** 3 / (t * 1e-9) / 1e12 if (t and cfg["M"]) else None
     stall = section_stall_total(kp)
     top = m.get(STALL_TOP)
     stats = {
         "time_us": t / 1e3 if t else None,
         "tflops": tflops,
+        "clock_ghz": clock_ghz,
         "pipe_pct": pipe,
         "dram_pct": dram_bps / cfg["dram_peak"] * 100.0 if dram_bps else None,
         "occupancy_pct": occ,
@@ -83,6 +86,7 @@ def _series_row(kp: KernelProfile, cfg: dict) -> dict:
     pipe = kp.metrics.get("sm__pipe_tensor_cycles_active.avg.pct_of_peak_sustained_active")
     dram_bps = kp.metrics.get("dram__bytes.sum.per_second")
     occ = kp.metrics.get("sm__warps_active.avg.pct_of_peak_sustained_active")
+    cycles = kp.metrics.get("sm__cycles_elapsed.avg")
     stall = section_stall_total(kp)
     top_stall = kp.metrics.get(STALL_TOP)
     tflops = 2.0 * cfg["M"] ** 3 / (t * 1e-9) / 1e12 if (t and cfg["M"]) else None
@@ -91,6 +95,7 @@ def _series_row(kp: KernelProfile, cfg: dict) -> dict:
         "name": kp.name,
         "time_us": t / 1e3 if t else None,
         "tflops": tflops,
+        "clock_ghz": cycles / t if (cycles and t) else None,
         "pipe_pct": pipe,
         "dram_pct": dram_bps / cfg["dram_peak"] * 100.0 if dram_bps else None,
         "occupancy_pct": occ,
@@ -120,7 +125,8 @@ def build(path: str, cfg: dict | None = None, kernel: str | None = None,
         prev = kp
     return {
         "meta": {
-            "input": str(path),
+            "input": (", ".join(str(p) for p in path) if isinstance(path, (list, tuple))
+                      else str(path)),
             "source": profs[0].provenance["source"] if profs else None,
             "kernels": len(profs),
             "device": {

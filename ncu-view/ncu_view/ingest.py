@@ -662,6 +662,11 @@ def _attach_device(kp: KernelProfile) -> None:
 
 
 def ingest(path: str | Path, kernel: str | None = None) -> list[KernelProfile]:
+    if isinstance(path, (list, tuple)):
+        profs: list[KernelProfile] = []
+        for p in path:
+            profs.extend(ingest(p, kernel))
+        return profs
     path = Path(path)
     suffix = path.suffix.lower()
     if suffix == ".json":

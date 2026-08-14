@@ -155,6 +155,10 @@ def _run_profile(args: argparse.Namespace) -> int:
         modal_gpu=args.modal_gpu,
         launch_skip=args.launch_skip,
         launch_count=args.launch_count,
+        clock_control=args.clock_control,
+        compare_cublas=args.compare_cublas,
+        bench_precision=args.bench_precision,
+        bench_shape=args.M,
     )
 
 
@@ -200,13 +204,28 @@ def main(argv: list[str] | None = None) -> int:
                          "(default H100)")
     ap.add_argument("--launch-skip", type=int, default=10, metavar="N",
                     help="profile: ncu launch skip, landing the capture past "
-                         "the app's warm-up so clocks are at boost; falls "
-                         "back to 1 then 0 for apps with few launches "
-                         "(default 10)")
+                         "the app's warm-up; falls back to 1 then 0 for "
+                         "apps with few launches (default 10)")
     ap.add_argument("--launch-count", type=int, default=1, metavar="N",
                     help="profile: ncu launches to capture; >1 averages "
                          "gpu__time_duration over steady-state launches "
                          "(default 1)")
+    ap.add_argument("--clock-control", default="boost",
+                    choices=("none", "base", "boost"),
+                    help="profile: ncu clock control for the capture. ncu's "
+                         "default 'base' locks the GPU to its base clock, "
+                         "which understates steady-state throughput by "
+                         "~30-45%%; 'boost' locks the max boost clock (the "
+                         "reproducible peak reviewers expect) and 'none' "
+                         "lets the app's warm-up drive clocks (default boost)")
+    ap.add_argument("--compare-cublas", action="store_true",
+                    help="profile: also profile a cuBLAS GEMM in the same "
+                         "run under identical ncu flags, so the report's "
+                         "series and chart compare your kernel against "
+                         "cuBLAS at the same clock")
+    ap.add_argument("--bench-precision", default="fp16", choices=("fp16", "bf16"),
+                    help="profile: precision of the cuBLAS comparison GEMM, "
+                         "matched to your kernel's io dtype (default fp16)")
     ap.add_argument("--no-modal", action="store_true",
                     help="profile: run ncu locally instead of on Modal")
     args = ap.parse_args(argv)

@@ -126,7 +126,10 @@ def _guess_run_cmd(src: Path) -> str:
 def run_profile(source: str, outdir: Path | None, build_cmd: str | None,
                 timeout: int, no_modal: bool,
                 modal_gpu: str = "H100",
-                launch_skip: int = 10, launch_count: int = 1) -> int:
+                launch_skip: int = 10, launch_count: int = 1,
+                clock_control: str = "boost", compare_cublas: bool = False,
+                bench_precision: str = "fp16",
+                bench_shape: int | None = None) -> int:
     """Profile a source tree with ncu and write the report into outdir."""
     import subprocess
 
@@ -139,13 +142,16 @@ def run_profile(source: str, outdir: Path | None, build_cmd: str | None,
     run_id = f"{src.name}-{int(time.time())}"
 
     run_cmd = build_cmd or _guess_run_cmd(src)
+    bench = ({"precision": bench_precision,
+              "shape": bench_shape or 8192} if compare_cublas else None)
 
     if no_modal:
         rep = outdir / f"{run_id}.ncu-rep"
         csv = outdir / f"{run_id}.raw.csv"
         cwd = src if src.is_dir() else src.parent
         try:
-            subprocess.run(["ncu", "--set", "full", "--launch-skip",
+            subprocess.run(["ncu", "--set", "full", "--clock-control",
+                            clock_control, "--launch-skip",
                             str(launch_skip), "--launch-count",
                             str(launch_count), "-o", str(rep), "sh", "-c",
                             run_cmd], cwd=cwd, check=True)
@@ -156,6 +162,28 @@ def run_profile(source: str, outdir: Path | None, build_cmd: str | None,
             subprocess.run(["ncu", "--import", str(rep), "--page", "raw",
                             "--csv"], cwd=cwd, check=True, stdout=f)
         _export_sections_locally(rep, outdir, cwd)
+        if bench:
+            from .modal_app import _cublas_bench_source
+            bench_src = outdir / "ncu-view-cublas-bench.cu"
+            bench_src.write_text(_cublas_bench_source(
+                bench["precision"], bench["shape"]))
+            bench_bin = outdir / "ncu-view-cublas-bench"
+            subprocess.run(["nvcc", "-arch=native", "-O3", "-lcublas",
+                            "-o", str(bench_bin), str(bench_src)],
+                           cwd=cwd, check=True)
+            crep = outdir / f"{run_id}-cublas.ncu-rep"
+            subprocess.run(["ncu", "--set", "full", "--clock-control",
+                            clock_control, "--launch-skip",
+                            str(launch_skip), "--launch-count",
+                            str(launch_count), "-o", str(crep), "sh", "-c",
+                            str(bench_bin)], cwd=cwd, check=True)
+            with open(outdir / f"{run_id}-cublas.raw.csv", "wb") as f:
+                subprocess.run(["ncu", "--import", str(crep), "--page",
+                                "raw", "--csv"], cwd=cwd, check=True,
+                               stdout=f)
+            _export_sections_locally(crep, outdir, cwd)
+        report_input = [rep, outdir / f"{run_id}-cublas.ncu-rep"] if bench \
+            else rep
     else:
         try:
             from .modal_app import profile_on_modal
@@ -163,17 +191,24 @@ def run_profile(source: str, outdir: Path | None, build_cmd: str | None,
             raise SystemExit("the profile command needs the modal package: "
                              "pip install modal") from None
         artifacts = profile_on_modal(src, run_cmd, run_id, modal_gpu, timeout,
-                                     launch_skip, launch_count)
+                                     launch_skip, launch_count, clock_control,
+                                     bench)
         if artifacts.get("error"):
             raise SystemExit(artifacts["error"])
         for name, data in artifacts.items():
+            if name.startswith("__"):
+                print(f"note: {data.decode()}")
+                continue
             (outdir / name).write_bytes(data)
         rep, csv = outdir / f"{run_id}.ncu-rep", outdir / f"{run_id}.raw.csv"
+        report_input = ([rep, outdir / f"{run_id}-cublas.ncu-rep"]
+                        if bench and (outdir / f"{run_id}-cublas.ncu-rep")
+                        .exists() else rep)
 
     from .html import render_html
     from .report import build
 
-    report = build(rep)
+    report = build(report_input)
     html = outdir / f"{run_id}.html"
     html.write_text(render_html(report))
     (outdir / f"{run_id}.json").write_text(json.dumps(report, indent=1))

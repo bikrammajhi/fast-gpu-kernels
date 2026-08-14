@@ -480,6 +480,7 @@ function trendFor(idx,metric,higherIsGood){
 function kernelPage(k){
   const s=k.stats||{};const v=k.verdict;const idx=DATA.series.findIndex(x=>x.key===k.key);
   const strip=statChip('Duration',s.time_us!=null?fmt(s.time_us,0):null,'µs')
+    +statChip('SM clock',s.clock_ghz!=null?fmt(s.clock_ghz,3):null,'GHz')
     +statChip('Tensor TFLOPS',s.tflops!=null?fmt(s.tflops,1):null,'TF/s',s.pipe_pct!=null?s.pipe_pct:null)
     +statChip('Tensor pipe',s.pipe_pct!=null?fmt(s.pipe_pct,1):null,'%',s.pipe_pct)
     +statChip('DRAM bandwidth',s.dram_pct!=null?fmt(s.dram_pct,1):null,'%',s.dram_pct)
