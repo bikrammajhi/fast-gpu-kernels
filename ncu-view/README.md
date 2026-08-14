@@ -142,6 +142,41 @@ in the same report series and TFLOPS chart, so your kernel and cuBLAS are
 compared at the same clock. `--bench-precision fp16|bf16` matches the
 baseline's io dtype to your kernel (default fp16).
 
+## Cross-GPU and cross-ecosystem compatibility
+
+`--compare-cublas` is orthogonal to the kernel kind being profiled and to the
+GPU — it is a standalone `cublasGemmEx` program recompiled per-arch on each
+node, so it works across **raw CUDA, CUTE C++, CUTLASS and CuTe DSL** sources,
+and across the **whole Modal catalog** (T4, L4, A10, L40S, A100, A100-40GB,
+A100-80GB, RTX-PRO-6000, H100, H200, B200, B200+, B300). Two caveats:
+
+- **bf16 baseline needs sm_80+** (A100 and newer). Only T4 (sm_75) in the
+  catalog lacks bf16 tensor GEMM, so `--bench-precision bf16` fails there;
+  fp16 works on every GPU in the catalog (sm_75+).
+- **Match the dtype.** The comparison is only as fair as the precision match.
+  `--bench-precision` should equal your kernel's `io_dtype` (e.g. fp16 for
+  `matmul_v6.py`).
+
+## Benchmark methodology (what reviewers accept)
+
+For a "reaching cuBLAS-like performance" claim the community expects numbers
+that are clock-fair, precision-matched and reproducible:
+
+- **Same, disclosed clock** — `--clock-control boost` (or locked `none`); the
+  report's per-kernel SM-clock chip makes the clock explicit so a base-clock
+  capture can never be mistaken for a boost-clock one.
+- **Same precision** — fp16/bf16 have identical dense rate on Blackwell tensor
+  cores, but the baseline's `--bench-precision` must match the kernel's dtype.
+- **Same shape & layout** — 8192³, fp32 accumulate, row-major, no sparsity.
+- **Warm-up + averaging** — `--launch-skip 10` skips warm-up; use
+  `--launch-count >1` and report min and mean±std, not a single snapshot.
+- **% of theoretical peak** — the report computes TFLOPS against the detected
+  device's dense peak (e.g. B200 = 2250 TF/s, so ~1770 TF/s ≈ 79%).
+- **Pinned toolchain** — the report records the device; pin CUTLASS/cute-dsl,
+  CUDA, ncu and driver versions in the write-up.
+- **A same-condition cuBLAS baseline** — `--compare-cublas` benchmarks cuBLAS
+  in the same run, same clock, rather than quoting a vendor figure.
+
 ## Inputs
 
 | input | how it's produced | fidelity |
@@ -217,6 +252,16 @@ profile options
                           A100-80GB RTX-PRO-6000 H100 H200 B200 B200+ B300
                           (default H100)
   --timeout N             Modal run timeout in seconds (default 1200)
+  --launch-skip N         ncu launch skip past warm-up (default 10; falls
+                          back to 1 then 0 for few-launch apps)
+  --launch-count N        ncu launches to capture; >1 averages steady-state
+                          (default 1)
+  --clock-control MODE    ncu clock control: boost | none | base (default
+                          boost; ncu's own base understates throughput ~30-45%)
+  --compare-cublas        also profile a cuBLAS GEMM under identical flags,
+                          same report series (fair, same-clock baseline)
+  --bench-precision P     baseline io dtype: fp16 | bf16 (default fp16; bf16
+                          needs sm_80+)
   --no-modal              run ncu locally instead of on Modal
 ```
 
