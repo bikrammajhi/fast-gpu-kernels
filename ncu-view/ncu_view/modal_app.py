@@ -141,16 +141,16 @@ int main() {{
 
 def _profile_source_body(run_cmd: str, run_id: str,
                          files: dict[str, bytes],
-                         launch_skip: int = 10,
+                         launch_skip: int | None = None,
                          launch_count: int = 1,
                          clock_control: str = "boost",
                          bench: dict | None = None) -> dict[str, bytes]:
     """Run `run_cmd` under ncu (full set), then re-export raw CSV + sections.
 
-    `launch_skip` lands the capture past the app's own warm-up loop so
-    steady-state launches are timed (a cold single launch reads ~1.5x slower
-    on data-center parts). Cascades: (skip,count) → (1,1) → (0,1) so
-    single-launch apps still profile. `clock_control` (default boost) is the
+    `launch_skip` defaults to None: every launch is profiled in one pass and
+    the report stars the dominant kernel (max total time) — works for any
+    app with no launch-order knowledge. Pass an explicit skip to land on a
+    specific launch instead. `clock_control` (default boost) is the
     ncu --clock-control setting: ncu's own default 'base' locks the GPU to
     base clock and understates throughput; boost gives the reproducible peak
     and none lets the app's warm-up drive clocks. If the host refuses boost,
@@ -189,19 +189,17 @@ def _profile_source_body(run_cmd: str, run_id: str,
                                str(count), "-o", rrep, "sh", "-c", cmd],
                               cwd=REMOTE_SRC, env=env, capture_output=True)
 
-    def _select(rrep: str, cmd: str, skip: int, count: int
+    def _select(rrep: str, cmd: str, skip: int | None, count: int
                 ) -> tuple[subprocess.CompletedProcess, str | None]:
         note = None
+        if skip is None:
+            skip, count = 0, 100000  # profile every launch; report stars the dominant kernel
         r = _capture_into(rrep, cmd, skip, count, clock_control)
         if r.returncode != 0 and clock_control == "boost":
             r2 = _capture_into(rrep, cmd, skip, count, "none")
             if r2.returncode == 0 and os.path.exists(rrep):
                 r, note = r2, ("ncu refused --clock-control boost on this "
                                "host; captured at natural clocks")
-        if r.returncode == 0 and not os.path.exists(rrep):
-            r = _capture_into(rrep, cmd, 1, 1, clock_control)
-        if r.returncode == 0 and not os.path.exists(rrep):
-            r = _capture_into(rrep, cmd, 0, 1, clock_control)
         return r, note
 
     ncu, note = _select(rep, run_cmd, launch_skip, launch_count)
@@ -255,7 +253,7 @@ def _profile_source_body(run_cmd: str, run_id: str,
 @app.function(image=image, gpu="T4", timeout=3600)
 def _profile_source_t4(run_cmd: str, run_id: str,
                        files: dict[str, bytes],
-                         launch_skip: int = 10,
+                         launch_skip: int | None = None,
                          launch_count: int = 1,
                          clock_control: str = "boost",
                          bench: dict | None = None) -> dict[str, bytes]:
@@ -266,7 +264,7 @@ def _profile_source_t4(run_cmd: str, run_id: str,
 @app.function(image=image, gpu="L4", timeout=3600)
 def _profile_source_l4(run_cmd: str, run_id: str,
                        files: dict[str, bytes],
-                         launch_skip: int = 10,
+                         launch_skip: int | None = None,
                          launch_count: int = 1,
                          clock_control: str = "boost",
                          bench: dict | None = None) -> dict[str, bytes]:
@@ -277,7 +275,7 @@ def _profile_source_l4(run_cmd: str, run_id: str,
 @app.function(image=image, gpu="A10", timeout=3600)
 def _profile_source_a10(run_cmd: str, run_id: str,
                         files: dict[str, bytes],
-                         launch_skip: int = 10,
+                         launch_skip: int | None = None,
                          launch_count: int = 1,
                          clock_control: str = "boost",
                          bench: dict | None = None) -> dict[str, bytes]:
@@ -288,7 +286,7 @@ def _profile_source_a10(run_cmd: str, run_id: str,
 @app.function(image=image, gpu="L40S", timeout=3600)
 def _profile_source_l40s(run_cmd: str, run_id: str,
                          files: dict[str, bytes],
-                         launch_skip: int = 10,
+                         launch_skip: int | None = None,
                          launch_count: int = 1,
                          clock_control: str = "boost",
                          bench: dict | None = None) -> dict[str, bytes]:
@@ -299,7 +297,7 @@ def _profile_source_l40s(run_cmd: str, run_id: str,
 @app.function(image=image, gpu="A100", timeout=3600)
 def _profile_source_a100(run_cmd: str, run_id: str,
                          files: dict[str, bytes],
-                         launch_skip: int = 10,
+                         launch_skip: int | None = None,
                          launch_count: int = 1,
                          clock_control: str = "boost",
                          bench: dict | None = None) -> dict[str, bytes]:
@@ -310,7 +308,7 @@ def _profile_source_a100(run_cmd: str, run_id: str,
 @app.function(image=image, gpu="A100-40GB", timeout=3600)
 def _profile_source_a100_40gb(run_cmd: str, run_id: str,
                               files: dict[str, bytes],
-                         launch_skip: int = 10,
+                         launch_skip: int | None = None,
                          launch_count: int = 1,
                          clock_control: str = "boost",
                          bench: dict | None = None) -> dict[str, bytes]:
@@ -321,7 +319,7 @@ def _profile_source_a100_40gb(run_cmd: str, run_id: str,
 @app.function(image=image, gpu="A100-80GB", timeout=3600)
 def _profile_source_a100_80gb(run_cmd: str, run_id: str,
                               files: dict[str, bytes],
-                         launch_skip: int = 10,
+                         launch_skip: int | None = None,
                          launch_count: int = 1,
                          clock_control: str = "boost",
                          bench: dict | None = None) -> dict[str, bytes]:
@@ -332,7 +330,7 @@ def _profile_source_a100_80gb(run_cmd: str, run_id: str,
 @app.function(image=image, gpu="RTX-PRO-6000", timeout=3600)
 def _profile_source_rtx_pro_6000(run_cmd: str, run_id: str,
                                  files: dict[str, bytes],
-                         launch_skip: int = 10,
+                         launch_skip: int | None = None,
                          launch_count: int = 1,
                          clock_control: str = "boost",
                          bench: dict | None = None) -> dict[str, bytes]:
@@ -343,7 +341,7 @@ def _profile_source_rtx_pro_6000(run_cmd: str, run_id: str,
 @app.function(image=image, gpu="H100", timeout=3600)
 def _profile_source_h100(run_cmd: str, run_id: str,
                          files: dict[str, bytes],
-                         launch_skip: int = 10,
+                         launch_skip: int | None = None,
                          launch_count: int = 1,
                          clock_control: str = "boost",
                          bench: dict | None = None) -> dict[str, bytes]:
@@ -354,7 +352,7 @@ def _profile_source_h100(run_cmd: str, run_id: str,
 @app.function(image=image, gpu="H200", timeout=3600)
 def _profile_source_h200(run_cmd: str, run_id: str,
                          files: dict[str, bytes],
-                         launch_skip: int = 10,
+                         launch_skip: int | None = None,
                          launch_count: int = 1,
                          clock_control: str = "boost",
                          bench: dict | None = None) -> dict[str, bytes]:
@@ -365,7 +363,7 @@ def _profile_source_h200(run_cmd: str, run_id: str,
 @app.function(image=image, gpu="B200", timeout=3600)
 def _profile_source_b200(run_cmd: str, run_id: str,
                          files: dict[str, bytes],
-                         launch_skip: int = 10,
+                         launch_skip: int | None = None,
                          launch_count: int = 1,
                          clock_control: str = "boost",
                          bench: dict | None = None) -> dict[str, bytes]:
@@ -376,7 +374,7 @@ def _profile_source_b200(run_cmd: str, run_id: str,
 @app.function(image=image, gpu="B200+", timeout=3600)
 def _profile_source_b200p(run_cmd: str, run_id: str,
                           files: dict[str, bytes],
-                         launch_skip: int = 10,
+                         launch_skip: int | None = None,
                          launch_count: int = 1,
                          clock_control: str = "boost",
                          bench: dict | None = None) -> dict[str, bytes]:
@@ -387,7 +385,7 @@ def _profile_source_b200p(run_cmd: str, run_id: str,
 @app.function(image=image, gpu="B300", timeout=3600)
 def _profile_source_b300(run_cmd: str, run_id: str,
                          files: dict[str, bytes],
-                         launch_skip: int = 10,
+                         launch_skip: int | None = None,
                          launch_count: int = 1,
                          clock_control: str = "boost",
                          bench: dict | None = None) -> dict[str, bytes]:
@@ -442,7 +440,7 @@ def extract_sections(rep_key: str, run_id: str,
 
 def profile_on_modal(source_dir: Path, run_cmd: str, run_id: str,
                      gpu: str, timeout: int,
-                     launch_skip: int = 10,
+                     launch_skip: int | None = None,
                      launch_count: int = 1,
                      clock_control: str = "boost",
                      bench: dict | None = None) -> dict[str, bytes]:

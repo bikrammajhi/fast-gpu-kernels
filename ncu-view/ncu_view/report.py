@@ -8,6 +8,7 @@ terminal summary, live server) consumes. Rules keep their `source` tag
 from __future__ import annotations
 
 from .ingest import ingest
+from . import ingest as _ingest
 from .model import KernelProfile, RuleResult, Section
 from .rules import rules_for
 from .sections import section_stall_total, sections_for
@@ -110,7 +111,7 @@ def build(path: str, cfg: dict | None = None, kernel: str | None = None,
     from .gpus import cfg_for_device, detect_device
 
     profs = ingest(path, kernel=kernel)
-    device = profs[0].device
+    device = profs[0].device if profs else None
     if gpu:
         device = detect_device(name=gpu)
     cfg = cfg_for_device(device, cfg)
@@ -129,6 +130,7 @@ def build(path: str, cfg: dict | None = None, kernel: str | None = None,
                       else str(path)),
             "source": profs[0].provenance["source"] if profs else None,
             "kernels": len(profs),
+            "noise_dropped": _ingest.noise_dropped,
             "device": {
                 "name": device.name if device else None,
                 "detected": device.detected if device else False,

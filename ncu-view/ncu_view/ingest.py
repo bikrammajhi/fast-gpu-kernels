@@ -20,6 +20,23 @@ from pathlib import Path
 
 from .model import KernelProfile, Row, RuleResult, Section
 
+NOISE_TENSOR_PCT = 5.0
+NOISE_NAMES = ("__nvcc_device_query", "at::", "distribution_",
+               "elementwise", "reduce_", "memcpy_", "memset_")
+noise_dropped = 0
+
+
+def _is_noise(kp: KernelProfile) -> bool:
+    """Runtime plumbing (torch init/compare, device query, memcpy) never
+    drives the tensor pipe, so the GEMM report drops it. The name fallback
+    only fires when the metric is absent (old ncu / curated inputs)."""
+    t = kp.metrics.get(
+        "sm__pipe_tensor_cycles_active.avg.pct_of_peak_sustained_active")
+    if t is not None:
+        return t < NOISE_TENSOR_PCT
+    return any(n in kp.name for n in NOISE_NAMES)
+
+
 STALL_BASES = [
     "smsp__average_warps_issue_stalled_long_scoreboard_per_issue_active",
     "smsp__average_warps_issue_stalled_short_scoreboard_per_issue_active",
@@ -363,13 +380,32 @@ def _ncu_section(sid: str, title: str | None = None, description: str = "",
     )
 
 
-def _parse_sec_csv(text: str, sid: str) -> list[Row]:
+def _sec_csv_kernels(text: str) -> set[str]:
+    """Distinct kernel names in a section CSV (empty when no column)."""
+    parsed = list(csv.reader(io.StringIO(text)))
+    for i, row in enumerate(parsed):
+        flat = [c.strip().lower() for c in row]
+        if "metric name" in flat:
+            header = [c.strip().lower() for c in row]
+            ki = header.index("kernel name") if "kernel name" in header else None
+            if ki is None:
+                return set()
+            return {r[ki].strip() for r in parsed[i + 1:]
+                    if len(r) > ki and r[ki].strip()}
+    return set()
+
+
+def _parse_sec_csv(text: str, sid: str,
+                   kernel_name: str | None = None) -> list[Row]:
     """Rows from `ncu --import rep --section <sid> --csv`.
 
     ncu 2025+ emits a long CSV: a header row naming the columns, then one
     row per metric with "Section Name","Metric Name","Metric Unit",
-    "Metric Value" columns. Older builds may emit plain label/value/unit
-    rows instead; both are handled here.
+    "Metric Value" columns. Rows of every captured kernel share one
+    header; `kernel_name` keeps only rows whose kernel column contains it
+    (ncu exports full mangled names; the report keys on the short name).
+    Older builds may emit plain label/value/unit rows instead; both are
+    handled here.
     """
     parsed = list(csv.reader(io.StringIO(text)))
     header_idx = None
@@ -383,11 +419,15 @@ def _parse_sec_csv(text: str, sid: str) -> list[Row]:
         i_name = header.index("metric name")
         i_val = header.index("metric value") if "metric value" in header else None
         i_unit = header.index("metric unit") if "metric unit" in header else None
+        i_kernel = header.index("kernel name") if "kernel name" in header else None
         if i_val is None:
             return []
         rows = []
         for row in parsed[header_idx + 1:]:
             if len(row) <= max(i_name, i_val):
+                continue
+            if i_kernel is not None and kernel_name is not None \
+                    and kernel_name not in row[i_kernel]:
                 continue
             label = row[i_name].strip()
             if not label or label.lower() == "metric name":
@@ -400,7 +440,7 @@ def _parse_sec_csv(text: str, sid: str) -> list[Row]:
             unit = row[i_unit].strip() if i_unit is not None and i_unit < len(row) else ""
             bar = value if (unit == "%" and 0.0 <= value <= 100.0) else None
             rows.append(Row(label=label, value=f"{value:g}", unit=unit, bar=bar))
-        return rows
+        return _dedupe_rows(rows)
     # Fallback: simple label/value(/unit) rows.
     out = []
     for row in parsed:
@@ -419,7 +459,16 @@ def _parse_sec_csv(text: str, sid: str) -> list[Row]:
         unit = cells[2].strip() if len(cells) > 2 else ""
         bar = value if (unit == "%" and 0.0 <= value <= 100.0) else None
         out.append(Row(label=cells[0], value=f"{value:g}", unit=unit, bar=bar))
-    return out
+    return _dedupe_rows(out)
+
+
+def _dedupe_rows(rows: list[Row]) -> list[Row]:
+    """A multi-launch capture exports one row block per launch; keep the
+    last block (steady state, matching the deduped kernel profile)."""
+    by_label: dict[str, Row] = {}
+    for r in rows:
+        by_label[r.label] = r
+    return list(by_label.values())
 
 
 def _sec_csv_files(path: Path) -> list[tuple[str, Path]]:
@@ -442,13 +491,15 @@ def _apply_sec_csvs(rep_path: Path, profs: list[KernelProfile],
     """
     for sid, p in _sec_csv_files(rep_path):
         try:
-            rows = _parse_sec_csv(p.read_text(), sid)
+            text = p.read_text()
         except OSError:
             continue
-        if not rows:
-            continue
+        multi = len(_sec_csv_kernels(text)) > 1
         for kp in profs:
             if kernel and kernel not in kp.key:
+                continue
+            rows = _parse_sec_csv(text, sid, kp.name if multi else None)
+            if not rows:
                 continue
             sec = _ncu_section(
                 sid=sid,
@@ -662,10 +713,14 @@ def _attach_device(kp: KernelProfile) -> None:
 
 
 def ingest(path: str | Path, kernel: str | None = None) -> list[KernelProfile]:
+    global noise_dropped
     if isinstance(path, (list, tuple)):
         profs: list[KernelProfile] = []
+        dropped = 0
         for p in path:
             profs.extend(ingest(p, kernel))
+            dropped += noise_dropped
+        noise_dropped = dropped
         return profs
     path = Path(path)
     suffix = path.suffix.lower()
@@ -678,6 +733,12 @@ def ingest(path: str | Path, kernel: str | None = None) -> list[KernelProfile]:
         _apply_sec_csvs(path, profs, kernel)
     else:
         raise ValueError(f"unsupported input {path} (want .json, .csv or .ncu-rep)")
+    kept: dict[str, KernelProfile] = {}
+    for kp in profs:
+        kept[kp.name] = kp
+    profs = list(kept.values())
+    noise_dropped = sum(_is_noise(kp) for kp in profs)
+    profs = [kp for kp in profs if not _is_noise(kp)]
     for kp in profs:
         _attach_device(kp)
     return profs

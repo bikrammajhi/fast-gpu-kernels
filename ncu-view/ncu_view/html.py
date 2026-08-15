@@ -312,7 +312,7 @@ const STALLPALETTE=['#4da3ff','#e9b64d','#4fd07c','#ec6b5a','#c08ae0','#5ac8c8',
 const SEC_ICONS={speedoflight:'◎',warpstate:'≋',occupancy:'▤',launchstats:'▲',scheduler:'⇄',computeworkload:'⬛',memoryworkload:'◫',instruction:'𝕴',pmsampling:'≋',nvlink:'⧉',schedulerstats:'⇄',warpstate:'≋',occupancy:'▤',launchstats:'▲',sourcecounters:'℗',memory:'◫'};
 const SECT_SID_ICON={'speedoflight':'◎','warpstate':'≋','occupancy':'▤','launchstats':'▲','schedulerstats':'⇄','computeworkload':'⬛','memoryworkload':'◫','instruction':'𝕴','pmsampling':'⊹','nvlink':'⧉','sourcecounters':'℗','memory':'◫'};
 
-let curKernel=DATA.kernels.length?DATA.kernels[0].key:null;
+let curKernel=DATA.kernels.length?DATA.kernels.reduce((a,b)=>((b.stats.time_us??0)>(a.stats.time_us??0)?b:a)).key:null;
 let curView='kernel';
 let searchQ='';
 

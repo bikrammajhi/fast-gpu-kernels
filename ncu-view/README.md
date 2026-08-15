@@ -117,11 +117,16 @@ latest-tag clone (`/opt/cutlass`), with both `-I .../include` and
 `-I .../tools/util/include` (the `util` helpers — `print_error.hpp`,
 `GPU_Clock.hpp` — live under `tools/util` in 3.x and 4.x alike).
 
-Profiling skips past the app's own warm-up loop (`--launch-skip 10` by
-default) so steady-state launches are timed — a cold single launch reads
-~1.5x slower than steady state on data-center parts. Apps with fewer
-launches fall back to skip 1, then skip 0 (single-launch apps still
-profile). Tune with `--launch-skip N` / `--launch-count N` (`>1` averages
+Profiling auto-captures every launch in one pass (same replay count as
+profiling one — ncu replays once per counter pass) and the report stars
+the dominant kernel (max total time, the steady-state benchmark loop),
+so any app profiles correctly with no launch-order knowledge. Runtime
+plumbing (torch init/compare, device query, memcpy — anything that never
+drives the tensor pipe, <5% tensor-pipe utilization) is dropped
+(`noise_dropped` in the report meta). Pass `--launch-skip N` to force a
+specific launch; apps with fewer launches still profile (launch 0 is
+always captured). Tune with `--launch-skip N` /
+`--launch-count N` (`>1` averages
 `gpu__time_duration` over several steady-state launches).
 
 **Clock fairness.** ncu's own default is `--clock-control base`, which locks
@@ -168,7 +173,8 @@ that are clock-fair, precision-matched and reproducible:
 - **Same precision** — fp16/bf16 have identical dense rate on Blackwell tensor
   cores, but the baseline's `--bench-precision` must match the kernel's dtype.
 - **Same shape & layout** — 8192³, fp32 accumulate, row-major, no sparsity.
-- **Warm-up + averaging** — `--launch-skip 10` skips warm-up; use
+- **Steady state** — auto mode profiles every launch and the report stars
+  the dominant one; use `--launch-skip N` to skip warm-up or
   `--launch-count >1` and report min and mean±std, not a single snapshot.
 - **% of theoretical peak** — the report computes TFLOPS against the detected
   device's dense peak (e.g. B200 = 2250 TF/s, so ~1770 TF/s ≈ 79%).
@@ -252,8 +258,8 @@ profile options
                           A100-80GB RTX-PRO-6000 H100 H200 B200 B200+ B300
                           (default H100)
   --timeout N             Modal run timeout in seconds (default 1200)
-  --launch-skip N         ncu launch skip past warm-up (default 10; falls
-                          back to 1 then 0 for few-launch apps)
+  --launch-skip N         ncu launch skip (default: auto — profile every
+                          launch; the report stars the dominant kernel)
   --launch-count N        ncu launches to capture; >1 averages steady-state
                           (default 1)
   --clock-control MODE    ncu clock control: boost | none | base (default

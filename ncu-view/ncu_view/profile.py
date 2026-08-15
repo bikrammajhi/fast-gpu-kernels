@@ -126,11 +126,16 @@ def _guess_run_cmd(src: Path) -> str:
 def run_profile(source: str, outdir: Path | None, build_cmd: str | None,
                 timeout: int, no_modal: bool,
                 modal_gpu: str = "H100",
-                launch_skip: int = 10, launch_count: int = 1,
+                launch_skip: int | None = None, launch_count: int = 1,
                 clock_control: str = "boost", compare_cublas: bool = False,
                 bench_precision: str = "fp16",
                 bench_shape: int | None = None) -> int:
-    """Profile a source tree with ncu and write the report into outdir."""
+    """Profile a source tree with ncu and write the report into outdir.
+
+    `launch_skip` defaults to None: every launch is profiled in one pass and
+    the report stars the dominant kernel (max total time) — works for any
+    app with no launch-order knowledge.
+    """
     import subprocess
 
     src = Path(source).expanduser().resolve()
@@ -149,11 +154,13 @@ def run_profile(source: str, outdir: Path | None, build_cmd: str | None,
         rep = outdir / f"{run_id}.ncu-rep"
         csv = outdir / f"{run_id}.raw.csv"
         cwd = src if src.is_dir() else src.parent
+        skip, count = (0, 100000) if launch_skip is None \
+            else (launch_skip, launch_count)
         try:
             subprocess.run(["ncu", "--set", "full", "--clock-control",
                             clock_control, "--launch-skip",
-                            str(launch_skip), "--launch-count",
-                            str(launch_count), "-o", str(rep), "sh", "-c",
+                            str(skip), "--launch-count",
+                            str(count), "-o", str(rep), "sh", "-c",
                             run_cmd], cwd=cwd, check=True)
         except FileNotFoundError:
             raise SystemExit("ncu not found on PATH: install Nsight Compute, "
@@ -174,8 +181,8 @@ def run_profile(source: str, outdir: Path | None, build_cmd: str | None,
             crep = outdir / f"{run_id}-cublas.ncu-rep"
             subprocess.run(["ncu", "--set", "full", "--clock-control",
                             clock_control, "--launch-skip",
-                            str(launch_skip), "--launch-count",
-                            str(launch_count), "-o", str(crep), "sh", "-c",
+                            str(skip), "--launch-count",
+                            str(count), "-o", str(crep), "sh", "-c",
                             str(bench_bin)], cwd=cwd, check=True)
             with open(outdir / f"{run_id}-cublas.raw.csv", "wb") as f:
                 subprocess.run(["ncu", "--import", str(crep), "--page",

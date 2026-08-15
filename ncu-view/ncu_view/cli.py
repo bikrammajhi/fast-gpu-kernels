@@ -202,10 +202,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--modal-gpu", default="H100", metavar="ACCELERATOR",
                     help="profile: Modal accelerator, e.g. H100, B200 "
                          "(default H100)")
-    ap.add_argument("--launch-skip", type=int, default=10, metavar="N",
-                    help="profile: ncu launch skip, landing the capture past "
-                         "the app's warm-up; falls back to 1 then 0 for "
-                         "apps with few launches (default 10)")
+    ap.add_argument("--launch-skip", type=int, default=None, metavar="N",
+                    help="profile: ncu launch skip (default: auto — every "
+                         "launch is profiled in one pass and the report "
+                         "stars the dominant kernel; pass N to force a "
+                         "specific launch)")
     ap.add_argument("--launch-count", type=int, default=1, metavar="N",
                     help="profile: ncu launches to capture; >1 averages "
                          "gpu__time_duration over steady-state launches "

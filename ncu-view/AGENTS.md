@@ -26,8 +26,14 @@ Operating notes for AI agents working in this repo. Read before making changes.
   (metrics/rules/samples only — no tables). Do not try to parse it directly.
 - **Section CSV format (ncu 2025+/13.x):** long format — header row contains
   "Metric Name"; columns `Section Name, Metric Name, Metric Unit, Metric Value`
-  (indices 11-14). One metric per row. Values may contain commas. `%` unit →
-  bar in the UI. Older format (label/value/unit rows) is the parser fallback.
+  (indices 11-14). One metric per row; values may contain commas; `%` unit →
+  bar in the UI. A multi-kernel rep exports ALL kernels' rows in ONE file
+  (full mangled names in the `Kernel Name` column, shared header) — the
+  overlay filters rows by short-name substring (`_sec_csv_kernels` + the
+  `kernel_name` param of `_parse_sec_csv`) and `_dedupe_rows` keeps only
+  the last row block per label (multi-launch exports repeat each metric
+  once per launch). Older format (label/value/unit
+  rows) is the parser fallback.
 - **The detail flag is `--page details`, NOT `--print-details`.** The latter is
   invalid and makes ncu fail. A section that still emits
   `==WARNING== No metrics to show` is retried without the flag (see
@@ -85,9 +91,14 @@ Operating notes for AI agents working in this repo. Read before making changes.
   failure (ncu run AND `ncu --import raw` — SystemExit/called-process errors
   in the container weren't serialized and the client died with empty output).
   The client prints the error dict and exits 1.
-- **ncu launch selection:** `--launch-skip 1 --launch-count 1` first (skips
-  the DSL's `__nvcc_device_query`); if the app made only ONE launch the rep
-  is never written (ncu exits 0!), so it RETRIES with `--launch-skip 0`.
+- **ncu launch selection:** default `launch_skip=None` profiles EVERY
+  launch in one pass (`--launch-count 100000 --launch-skip 0` — same replay
+  count as count 1, since ncu replays once per counter pass). `ingest`
+  dedupes by kernel name (last occurrence = steady state), drops runtime
+  plumbing (tensor-pipe util < 5% — torch init/compare, device query,
+  memcpy; `NOISE_TENSOR_PCT`/`NOISE_NAMES` in `ingest.py`), and the report
+  JS stars the dominant kernel (max time_us). Explicit `--launch-skip N`
+  still forces a single launch.
 - **`profile` command verified end-to-end on Modal** for all four kernel
   kinds — raw CUDA (`cuda/A100/matmul_v1.cu` + `benchmark.cu` via
   `--build-cmd`), CUTE C++ (`cute/H100/matmul_v1.cu`), CUTLASS C++
