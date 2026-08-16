@@ -58,3 +58,36 @@ Benefits:
 
 ### v4 → v5: Warp-specialized design
 Dedicated warps: TMA (ID 5), MMA (ID 4), Epilogue (IDs 0-3). Warps work in parallel, hiding DRAM latency.
+
+---
+
+## Profiling with Nsight Compute (ncu)
+
+Capture a full-detail NVIDIA Nsight Compute report (`.ncu-rep`) for any
+kernel here and open it in your local Nsight Compute GUI — no local GPU
+needed. Only the report file is written, to the path you give `-o`:
+
+```bash
+ncu --set full --warp-sampling-interval auto --clock-control base \
+    --launch-skip 1 --launch-count 1 \
+    -o out/matmul_v5.ncu-rep python3 matmul_v5.py
+```
+
+### On Modal (no local GPU) — download only the `.ncu-rep`
+
+```bash
+modal run scripts/ncu_capture.py --src kernels/cute_dsl/B200/matmul_v5.py --gpu B200
+#   → writes captures/matmul_v5.ncu-rep on the gpulab-cute-dsl-traces volume
+
+modal volume get gpulab-cute-dsl-traces captures/matmul_v5.ncu-rep ./matmul_v5.ncu-rep
+```
+
+### Open it locally (no GPU required)
+
+```bash
+ncu-ui matmul_v5.ncu-rep        # or File → Open in the Nsight Compute GUI
+```
+
+An `.ncu-rep` is a self-contained capture — ncu only needs the GPU at
+capture time. A golden capture is committed in this directory at
+`results/golden/matmul_v1.ncu-rep` — open it the same way.

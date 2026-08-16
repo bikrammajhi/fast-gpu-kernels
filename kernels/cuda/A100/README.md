@@ -52,3 +52,27 @@ modal run scripts/run.py --task kernels/cuda/A100/benchmark.cu
 ```
 
 Full optimization journal (per-version breakdowns, diagrams, lessons learned): [docs/README.md](docs/README.md)
+
+---
+
+## Profiling with Nsight Compute (ncu)
+
+Capture a full-detail NVIDIA Nsight Compute report (`.ncu-rep`) and open it
+in your local Nsight Compute GUI — no local GPU needed. Only the report file
+is written, to the path you give `-o`:
+
+```bash
+nvcc -O3 -arch=sm_80 -lcublas -o /tmp/bench benchmark.cu
+ncu --set full --warp-sampling-interval auto --clock-control base \
+    --launch-skip 1 --launch-count 1 -o out/matmul_v11a.ncu-rep /tmp/bench
+```
+
+On Modal (no local GPU) — download only the `.ncu-rep`:
+
+```bash
+modal run scripts/ncu_capture.py --src kernels/cuda/A100/benchmark.cu --gpu A100-40GB
+modal volume get gpulab-cute-dsl-traces captures/benchmark.ncu-rep ./benchmark.ncu-rep
+```
+
+Open it locally: `ncu-ui benchmark.ncu-rep` (or File → Open in the Nsight
+Compute GUI) — ncu only needs the GPU at capture time.

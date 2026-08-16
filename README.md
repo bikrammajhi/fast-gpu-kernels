@@ -179,3 +179,63 @@ Edit the default GPU in `scripts/run.py:108` or pass `--gpu`:
 | A10 | A10 |
 | L4 | L4 |
 | T4 | T4 |
+
+---
+
+## Profiling with Nsight Compute (ncu)
+
+Capture NVIDIA Nsight Compute reports (`.ncu-rep`) for any kernel in this
+repo and open them in your local Nsight Compute GUI — no local GPU needed.
+Every capture uses the full metric set and writes **only** the report file
+to the path you give `-o`:
+
+```bash
+ncu --set full --warp-sampling-interval auto --clock-control base \
+    --launch-skip 1 --launch-count 1 -o <path>/<name>.ncu-rep <application>
+```
+
+### On a machine with the GPU
+
+```bash
+# hand-written CUDA (A100) — compile, then capture
+nvcc -O3 -arch=sm_80 -lcublas -o /tmp/bench kernels/cuda/A100/benchmark.cu
+ncu --set full --warp-sampling-interval auto --clock-control base \
+    --launch-skip 1 --launch-count 1 -o out/matmul_v11a.ncu-rep /tmp/bench
+
+# CuTe (H100) — add your cutlass -I flags to the nvcc line
+ncu --set full --warp-sampling-interval auto --clock-control base \
+    --launch-skip 1 --launch-count 1 -o out/matmul_v4.ncu-rep /tmp/bench
+
+# CuTe DSL Python (B200) — no compile step
+ncu --set full --warp-sampling-interval auto --clock-control base \
+    --launch-skip 1 --launch-count 1 \
+    -o out/matmul_v5.ncu-rep python3 kernels/cute_dsl/B200/matmul_v5.py
+```
+
+### On Modal (no local GPU) — download only the `.ncu-rep`
+
+```bash
+modal run scripts/ncu_capture.py --src kernels/cute_dsl/B200/matmul_v5.py --gpu B200
+#   → writes captures/matmul_v5.ncu-rep on the gpulab-cute-dsl-traces volume
+#     (plain ncu: --set full --warp-sampling-interval auto --clock-control base
+#      --launch-skip 1 --launch-count 1 -o captures/matmul_v5.ncu-rep python3 …)
+
+modal volume get gpulab-cute-dsl-traces captures/matmul_v5.ncu-rep ./matmul_v5.ncu-rep
+```
+
+The runner compiles `.cu` sources with the repo's arch map (`sm_80` A100,
+`sm_90` H100, `sm_100` B200) and sets `CUTE_DSL_ARCH` for DSL kernels;
+`--gpu` accepts the full Modal catalog (`A100-40GB A100-80GB H100 H200 B200
+B200+ L40S A10 L4 T4 RTX-PRO-6000`). `--clock-control boost|none`,
+`--launch-skip N` and `--launch-count N` map straight onto ncu.
+
+### Open it locally (no GPU required)
+
+```bash
+ncu-ui matmul_v5.ncu-rep        # or File → Open in the Nsight Compute GUI
+```
+
+An `.ncu-rep` is a self-contained capture — ncu only needs the GPU at
+capture time, so the GUI reads it on any machine. A ready-made golden
+capture is committed at
+`kernels/cute_dsl/B200/results/golden/matmul_v1.ncu-rep`.
