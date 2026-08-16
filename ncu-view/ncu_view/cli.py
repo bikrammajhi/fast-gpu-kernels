@@ -114,12 +114,23 @@ def _parse_config(items: list[str]) -> dict:
     return cfg
 
 
+def _kernel_name(input_path: Path) -> str:
+    """The input's kernel name: file name minus known profile suffixes."""
+    name = input_path.name
+    for suffix in (".ncu-rep", ".raw.csv", ".csv", ".json"):
+        if name.endswith(suffix):
+            return name[: -len(suffix)]
+    return input_path.stem
+
+
 def _default_outdir(outdir: str | None, inputs: list[str]) -> Path:
     if outdir:
         d = Path(outdir)
         d.mkdir(parents=True, exist_ok=True)
         return d
-    return Path(inputs[0]).parent
+    d = Path(inputs[0]).parent / f"{_kernel_name(Path(inputs[0]))}-ncu-report"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
 
 
 def _build_report(args: argparse.Namespace) -> dict:
@@ -179,8 +190,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="input file (repeatable; positional works too)")
     ap.add_argument("-o", "--outdir", "--out", "--path-to-report",
                     default=None, metavar="DIR",
-                    help="directory for the report files (default: next to "
-                         "the input)")
+                    help="directory for the report files (default: "
+                         "<kernel>-ncu-report/ next to the input)")
     ap.add_argument("--kernel-regex", default=None,
                     help="only analyze kernels matching this regex")
     ap.add_argument("--config", action="append", default=None, metavar="k=v",

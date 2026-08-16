@@ -142,7 +142,7 @@ def run_profile(source: str, outdir: Path | None, build_cmd: str | None,
     if not src.exists():
         raise SystemExit(f"source {src} does not exist")
 
-    outdir = outdir or Path(".")
+    outdir = outdir or src.parent / f"{src.stem if src.is_file() else src.name}-ncu-report"
     outdir.mkdir(parents=True, exist_ok=True)
     run_id = f"{src.name}-{int(time.time())}"
 

@@ -65,14 +65,21 @@ and cached automatically on first use.
 Build a report from any profile input:
 
 ```bash
-ncu-view report  results/ncu_counters.json            # writes .html + .json next to the input
-ncu-view report  report.ncu-rep -o out/ --open        # .ncu-rep also carries NVIDIA's own sections
-ncu-view summary report.ncu-rep                      # terminal verdict table
-ncu-view serve   report.ncu-rep --port 8000          # live view: /report.html, /report.json
+ncu-view report  results/ncu_counters.json
+# → creates results/ncu_counters-ncu-report/ncu_counters.html + .json
+#   (a "<kernel>-ncu-report/" folder next to the input)
+
+ncu-view report  report.ncu-rep --open
+# → creates report-ncu-report/report.html + .json
+#   (.ncu-rep also carries NVIDIA's own sections)
+
+ncu-view report  report.ncu-rep -o out/             # -o overrides the folder
+ncu-view summary report.ncu-rep                    # terminal verdict table
+ncu-view serve   report.ncu-rep --port 8000        # live view: /report.html, /report.json
 ```
 
-`report` is the default command, so `ncu-view --path foo.ncu-rep -o out/`
-does the same thing.
+`report` is the default command, so the word is optional:
+`ncu-view foo.ncu-rep` is the same as `ncu-view report foo.ncu-rep`.
 
 ## Profile anything with one command
 
@@ -98,6 +105,9 @@ ncu-view profile . --build-cmd 'make && ./run' -o out/   # Makefile projects
 # run ncu locally instead (needs ncu on PATH)
 ncu-view profile src -o out/ --no-modal
 ```
+
+Omitting `-o` uses the same convention as `report`: everything lands in a
+`<source-name>-ncu-report/` folder next to the source.
 
 How the source is run when you don't pass `--build-cmd`:
 
@@ -242,7 +252,8 @@ ncu-view [command] [options] INPUT...
 commands: report (default) | summary | serve | view | profile
 
 common options
-  -o, --outdir DIR        where to write the report (default: next to input)
+  -o, --outdir DIR        where to write the report (default: a
+                          <kernel>-ncu-report/ folder next to the input)
   --kernel-regex REGEX    only analyze kernels matching REGEX
   --config k=v            override a config key, e.g. --config M=4096
                           --config tensor_peak=1800 (repeatable)
