@@ -1,4 +1,4 @@
-"""CLI smoke tests: subcommand dispatch, output files, device override."""
+"""CLI smoke tests: subcommand dispatch, output files, device name."""
 
 from __future__ import annotations
 
@@ -58,11 +58,11 @@ def test_summary_exits_zero():
     assert main(["summary", str(_input())]) == 0
 
 
-def test_gpu_override(tmp_path):
-    rc = main(["report", str(_input()), "-o", str(tmp_path), "--gpu", "H100 SXM"])
+def test_device_name_from_profile(tmp_path):
+    rc = main(["report", str(_input()), "-o", str(tmp_path)])
     assert rc == 0
     payload = (tmp_path / f"{_input().stem}.json").read_text()
-    assert '"name": "H100 SXM"' in payload
+    assert '"device": {' in payload and '"name":' in payload
 
 
 def test_kernel_regex_filters():
@@ -70,9 +70,8 @@ def test_kernel_regex_filters():
     assert rc == 0
 
 
-def test_bad_gpu_keeps_working(tmp_path):
-    rc = main(["report", str(_input()), "-o", str(tmp_path),
-               "--gpu", "NVIDIA Quantum X1"])
+def test_unknown_device_name(tmp_path):
+    rc = main(["report", str(BLOG_JSON), "-o", str(tmp_path)])
     assert rc == 0
-    payload = (tmp_path / f"{_input().stem}.json").read_text()
-    assert "not in catalog" in payload
+    payload = (tmp_path / f"{BLOG_JSON.stem}.json").read_text()
+    assert '"name": null' in payload

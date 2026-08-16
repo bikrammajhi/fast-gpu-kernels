@@ -14,8 +14,9 @@ Two ways to run:
 
 The harness ingests both views of the SAME profile — the .ncu-rep via
 ncu_view.ingest_report and the raw CSV via ingest_csv — and requires every
-shared counter to agree within tolerance, plus the derived sections/rules
-to render identically. Divergence = a bug in ncu-view, not in ncu.
+shared official counter to agree within tolerance. The .ncu-rep ingest must
+additionally carry NVIDIA's own sections and rule results (the raw CSV
+export has neither). Divergence = a bug in ncu-view, not in ncu.
 """
 
 from __future__ import annotations
@@ -29,8 +30,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 
 from ncu_view.ingest import STALL_BASES, ingest
-from ncu_view.rules import rules_for
-from ncu_view.sections import tma_pct
+from ncu_view.report import _ncu_verdict
 
 TOL = {
     "time": 1e-9,          # exact: same report file
@@ -77,8 +77,8 @@ def _ingest_pair(report_path: str, csv_path: str):
                     f"{kp.name}: {metric}: ncu-rep {a:.6g} vs csv {b:.6g}"
                 )
         # The warp-stall counters are the heart of the analysis: both ingests
-        # must carry all of them and agree, or the sections and verdicts are
-        # not comparing like with like.
+        # must carry all of them and agree, or the report is not comparing
+        # like with like.
         for base in STALL_BASES:
             a, b = rp.metrics.get(base), kp.metrics.get(base)
             if a is None or b is None:
@@ -87,17 +87,15 @@ def _ingest_pair(report_path: str, csv_path: str):
                 continue
             if abs(a - b) > TOL["default"] * max(1.0, abs(a), abs(b)):
                 mismatched.append(f"{kp.name}: {base}: ncu-rep {a:.6g} vs csv {b:.6g}")
-        ta, tb = tma_pct(rp)[0], tma_pct(kp)[0]
-        if ta is None or tb is None or abs(ta - tb) > 1e-6 * max(1.0, abs(ta), abs(tb)):
-            mismatched.append(f"{kp.name}: TMA pct: ncu-rep {ta} vs csv {tb}")
-        if mismatched:
-            continue
-        r_verdict = next((r for r in rules_for(rp, None, {}) if r.rid == "verdict"), None)
-        c_verdict = next((r for r in rules_for(kp, None, {}) if r.rid == "verdict"), None)
-        rv = r_verdict.name if r_verdict else None
-        cv = c_verdict.name if c_verdict else None
-        if rv != cv:
-            mismatched.append(f"{kp.name}: verdict differs: {rv} vs {cv}")
+        # The .ncu-rep ingest must carry NVIDIA's own sections and rules;
+        # the raw CSV ingest carries neither (NVIDIA exports those only via
+        # section CSVs), so this check is one-directional.
+        if not rp.ncu_sections:
+            mismatched.append(f"{kp.name}: .ncu-rep ingest carries no NVIDIA sections")
+        if not rp.ncu_rules:
+            mismatched.append(f"{kp.name}: .ncu-rep ingest carries no NVIDIA rules")
+        elif _ncu_verdict(rp) is None:
+            mismatched.append(f"{kp.name}: no banner rule from NVIDIA's rule engine")
     return mismatched
 
 
@@ -137,7 +135,7 @@ def main(argv: list[str] | None = None) -> int:
         for m in mismatches:
             print(f"  - {m}")
         return 1
-    print("OK: .ncu-rep ingest, CSV ingest, sections and verdicts agree")
+    print("OK: .ncu-rep ingest, CSV ingest and NVIDIA sections/rules agree")
     return 0
 
 

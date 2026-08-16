@@ -1,19 +1,21 @@
-"""Assemble kernels, sections and rules into one analysis artifact.
+"""Assemble kernels and NVIDIA's own sections/rules into one report artifact.
 
 `build` returns a plain-JSON-safe dict that every renderer (HTML report,
-terminal summary, live server) consumes. Rules keep their `source` tag
-("our" today; "ncu" once .ncu-rep ingest lands in Phase 2).
+terminal summary, live server) consumes. Everything in it is NVIDIA's own
+data: the sections and rule results exported from the .ncu-rep, plus raw
+official counters for the summary chips. No analysis of our own is
+invented on top.
 """
 
 from __future__ import annotations
 
-from .ingest import ingest
 from . import ingest as _ingest
+from .ingest import ingest
 from .model import KernelProfile, RuleResult, Section
-from .rules import rules_for
-from .sections import section_stall_total, sections_for
 
 STALL_TOP = "smsp__average_warps_issue_stalled_long_scoreboard_per_issue_active"
+
+SEV_RANK = {"critical": 0, "warning": 1, "suggestion": 2, "info": 3, "hint": 4}
 
 
 def _rule_dict(r: RuleResult) -> dict:
@@ -46,28 +48,46 @@ def _section_dict(s: Section) -> dict:
     }
 
 
-def _kernel_dict(kp: KernelProfile, rules: list[RuleResult],
-                 sections: list[Section], cfg: dict) -> dict:
-    verdict = next((r for r in rules if r.rid == "verdict"), None)
+def _ncu_verdict(kp: KernelProfile) -> RuleResult | None:
+    """The banner rule: NVIDIA's Speed Of Light bottleneck rule when the
+    rule engine reported one, else its most severe rule."""
+    for r in kp.ncu_rules:
+        if r.rid == "SOLBottleneck":
+            return r
+    ranked = sorted(kp.ncu_rules,
+                    key=lambda r: SEV_RANK.get(r.severity, 9))
+    return ranked[0] if ranked else None
+
+
+def _sm_freq(kp: KernelProfile) -> float | None:
+    """SM clock: NVIDIA's Speed Of Light "SM Frequency" row when exported,
+    else the same formula from ncu's own counters."""
+    for sec in kp.ncu_sections:
+        if sec.sid != "SpeedOfLight":
+            continue
+        for r in sec.rows:
+            if r.label == "SM Frequency":
+                try:
+                    return float(r.value)
+                except (TypeError, ValueError):
+                    return None
     m = kp.metrics
-    t = m.get("gpu__time_duration.avg")
-    pipe = m.get("sm__pipe_tensor_cycles_active.avg.pct_of_peak_sustained_active")
-    dram_bps = m.get("dram__bytes.sum.per_second")
-    occ = m.get("sm__warps_active.avg.pct_of_peak_sustained_active")
-    cycles = m.get("sm__cycles_elapsed.avg")
-    clock_ghz = cycles / t if (cycles and t) else None
-    tflops = 2.0 * cfg["M"] ** 3 / (t * 1e-9) / 1e12 if (t and cfg["M"]) else None
-    stall = section_stall_total(kp)
-    top = m.get(STALL_TOP)
+    cycles, t = m.get("sm__cycles_elapsed.avg"), m.get("gpu__time_duration.avg")
+    return cycles / t if (cycles and t) else None
+
+
+def _kernel_dict(kp: KernelProfile) -> dict:
+    verdict = _ncu_verdict(kp)
+    m = kp.metrics
     stats = {
-        "time_us": t / 1e3 if t else None,
-        "tflops": tflops,
-        "clock_ghz": clock_ghz,
-        "pipe_pct": pipe,
-        "dram_pct": dram_bps / cfg["dram_peak"] * 100.0 if dram_bps else None,
-        "occupancy_pct": occ,
-        "stall_cycles": stall,
-        "top_stall_pct": top,
+        "time_us": m.get("gpu__time_duration.avg") / 1e3
+        if m.get("gpu__time_duration.avg") else None,
+        "clock_ghz": _sm_freq(kp),
+        "pipe_pct": m.get("sm__pipe_tensor_cycles_active.avg.pct_of_peak_sustained_active"),
+        "dram_pct": _ingest.dram_pct_of_peak(kp),
+        "occupancy_pct": m.get("sm__warps_active.avg.pct_of_peak_sustained_active"),
+        "stall_cycles": _ingest.stall_total(kp),
+        "top_stall_pct": m.get(STALL_TOP),
     }
     return {
         "key": kp.key,
@@ -75,55 +95,33 @@ def _kernel_dict(kp: KernelProfile, rules: list[RuleResult],
         "provenance": kp.provenance,
         "stats": stats,
         "verdict": _rule_dict(verdict) if verdict else None,
-        "rules": [_rule_dict(r) for r in rules],
-        "sections": [_section_dict(s) for s in sections],
-        "ncu_sections": [_section_dict(s) for s in kp.ncu_sections],
-        "ncu_rules": [_rule_dict(r) for r in kp.ncu_rules],
+        "rules": [_rule_dict(r) for r in kp.ncu_rules],
+        "sections": [_section_dict(s) for s in kp.ncu_sections],
     }
 
 
-def _series_row(kp: KernelProfile, cfg: dict) -> dict:
-    t = kp.metrics.get("gpu__time_duration.avg")
-    pipe = kp.metrics.get("sm__pipe_tensor_cycles_active.avg.pct_of_peak_sustained_active")
-    dram_bps = kp.metrics.get("dram__bytes.sum.per_second")
-    occ = kp.metrics.get("sm__warps_active.avg.pct_of_peak_sustained_active")
-    cycles = kp.metrics.get("sm__cycles_elapsed.avg")
-    stall = section_stall_total(kp)
-    top_stall = kp.metrics.get(STALL_TOP)
-    tflops = 2.0 * cfg["M"] ** 3 / (t * 1e-9) / 1e12 if (t and cfg["M"]) else None
-    row = {
+def _series_row(kp: KernelProfile) -> dict:
+    m = kp.metrics
+    verdict = _ncu_verdict(kp)
+    return {
         "key": kp.key,
         "name": kp.name,
-        "time_us": t / 1e3 if t else None,
-        "tflops": tflops,
-        "clock_ghz": cycles / t if (cycles and t) else None,
-        "pipe_pct": pipe,
-        "dram_pct": dram_bps / cfg["dram_peak"] * 100.0 if dram_bps else None,
-        "occupancy_pct": occ,
-        "stall_cycles": stall,
-        "top_stall": top_stall,
+        "time_us": m.get("gpu__time_duration.avg") / 1e3
+        if m.get("gpu__time_duration.avg") else None,
+        "clock_ghz": _sm_freq(kp),
+        "pipe_pct": m.get("sm__pipe_tensor_cycles_active.avg.pct_of_peak_sustained_active"),
+        "dram_pct": _ingest.dram_pct_of_peak(kp),
+        "occupancy_pct": m.get("sm__warps_active.avg.pct_of_peak_sustained_active"),
+        "stall_cycles": _ingest.stall_total(kp),
+        "top_stall": m.get(STALL_TOP),
+        "verdict": verdict.name if verdict else None,
     }
-    return row
 
 
-def build(path: str, cfg: dict | None = None, kernel: str | None = None,
-          gpu: str | None = None) -> dict:
-    from .gpus import cfg_for_device, detect_device
-
+def build(path: str, kernel: str | None = None) -> dict:
     profs = ingest(path, kernel=kernel)
-    device = profs[0].device if profs else None
-    if gpu:
-        device = detect_device(name=gpu)
-    cfg = cfg_for_device(device, cfg)
-    kernels = []
-    series = []
-    prev: KernelProfile | None = None
-    for kp in profs:
-        rules = rules_for(kp, prev, cfg)
-        sections = sections_for(kp, cfg)
-        kernels.append(_kernel_dict(kp, rules, sections, cfg))
-        series.append(_series_row(kp, cfg))
-        prev = kp
+    kernels = [_kernel_dict(kp) for kp in profs]
+    series = [_series_row(kp) for kp in profs]
     return {
         "meta": {
             "input": (", ".join(str(p) for p in path) if isinstance(path, (list, tuple))
@@ -132,14 +130,7 @@ def build(path: str, cfg: dict | None = None, kernel: str | None = None,
             "kernels": len(profs),
             "noise_dropped": _ingest.noise_dropped,
             "device": {
-                "name": device.name if device else None,
-                "detected": device.detected if device else False,
-                "matched": device.matched if device else False,
-                "note": device.note if device else "",
-                "tensor_peak_tflops": cfg["tensor_peak"],
-                "dram_peak_gbps": cfg["dram_peak"] / 1e9,
-                "max_warps_per_sm": cfg["max_warps_per_sm"],
-                "smsp_per_sm": cfg["smsp_per_sm"],
+                "name": profs[0].device_name if profs else None,
             },
         },
         "kernels": kernels,

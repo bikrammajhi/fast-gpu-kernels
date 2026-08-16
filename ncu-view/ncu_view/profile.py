@@ -117,8 +117,20 @@ def _guess_run_cmd(src: Path) -> str:
         return f"python3 {src.name}"
     if src.suffix == ".cu":
         bin_path = f"/tmp/{src.stem}-run"
+        parts = [src.name]
+        if "int main" not in src.read_text(errors="ignore"):
+            drivers = sorted(
+                p.name for p in src.parent.iterdir()
+                if p.suffix == ".cu" and p != src
+                and "int main" in p.read_text(errors="ignore"))
+            if not drivers:
+                raise SystemExit(f"{src.name} has no main() and no sibling "
+                                 "driver found; pass --build-cmd "
+                                 "(e.g. 'nvcc -O3 matmul.cu driver.cu "
+                                 "-o run && ./run')")
+            parts += drivers
         return f"nvcc -arch=native -O3{_cutlass_include()} -lcublas " \
-               f"-o {bin_path} {src.name} && {bin_path}"
+               f"-o {bin_path} " + " ".join(parts) + f" && {bin_path}"
     raise SystemExit(f"cannot guess how to run {src}: pass --build-cmd "
                      "(e.g. 'python3 matmul_v1.py')")
 
@@ -127,14 +139,15 @@ def run_profile(source: str, outdir: Path | None, build_cmd: str | None,
                 timeout: int, no_modal: bool,
                 modal_gpu: str = "H100",
                 launch_skip: int | None = None, launch_count: int = 1,
-                clock_control: str = "boost", compare_cublas: bool = False,
+                clock_control: str = "base", compare_cublas: bool = False,
                 bench_precision: str = "fp16",
                 bench_shape: int | None = None) -> int:
     """Profile a source tree with ncu and write the report into outdir.
 
-    `launch_skip` defaults to None: every launch is profiled in one pass and
-    the report stars the dominant kernel (max total time) — works for any
-    app with no launch-order knowledge.
+    `launch_skip` defaults to None: skip the warmup launch and profile ONE
+    kernel (launch 1) — works for any app with no launch-order knowledge.
+    Pass an explicit skip to land on a specific launch, or a launch_count > 1
+    to average over steady-state launches.
     """
     import subprocess
 
@@ -148,13 +161,16 @@ def run_profile(source: str, outdir: Path | None, build_cmd: str | None,
 
     run_cmd = build_cmd or _guess_run_cmd(src)
     bench = ({"precision": bench_precision,
-              "shape": bench_shape or 8192} if compare_cublas else None)
+              "shape": bench_shape} if compare_cublas else None)
+    if bench and not bench["shape"]:
+        raise SystemExit("--compare-cublas needs --M (the cuBLAS comparison "
+                         "GEMM's size — no assumed default)")
 
     if no_modal:
         rep = outdir / f"{run_id}.ncu-rep"
         csv = outdir / f"{run_id}.raw.csv"
         cwd = src if src.is_dir() else src.parent
-        skip, count = (0, 100000) if launch_skip is None \
+        skip, count = (1, 1) if launch_skip is None \
             else (launch_skip, launch_count)
         try:
             subprocess.run(["ncu", "--set", "full", "--clock-control",

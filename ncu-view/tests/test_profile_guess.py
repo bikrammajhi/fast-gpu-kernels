@@ -18,11 +18,24 @@ def test_cu_dir_compiles_with_cutlass_includes(monkeypatch, tmp_path):
 
 def test_single_cu_file_gets_include_flags(monkeypatch, tmp_path):
     f = tmp_path / "one.cu"
-    f.write_text("__global__ void k() {}\n")
+    f.write_text("__global__ void k() {}\nint main() { return 0; }\n")
     monkeypatch.setattr("ncu_view.profile._cutlass_include", lambda: " -I/opt/cutlass/include")
     cmd = _guess_run_cmd(f)
     assert f"-o /tmp/one-run {f.name}" in cmd
     assert "-I/opt/cutlass/include" in cmd
+
+
+def test_cu_without_main_picks_sibling_driver(tmp_path):
+    (tmp_path / "kern.cu").write_text("__global__ void k() {}\n")
+    (tmp_path / "driver.cu").write_text("int main() { return 0; }\n")
+    cmd = _guess_run_cmd(tmp_path / "kern.cu")
+    assert "kern.cu driver.cu" in cmd and "-o /tmp/kern-run" in cmd
+
+
+def test_cu_without_main_or_driver_errors(tmp_path):
+    (tmp_path / "orphan.cu").write_text("__global__ void k() {}\n")
+    with pytest.raises(SystemExit, match="--build-cmd"):
+        _guess_run_cmd(tmp_path / "orphan.cu")
 
 
 def test_run_py_wins(monkeypatch, tmp_path):

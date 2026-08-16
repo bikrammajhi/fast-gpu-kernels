@@ -8,8 +8,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .gpus import Device
-
 
 @dataclass
 class Row:
@@ -60,8 +58,8 @@ class KernelProfile:
     # String-typed metrics (e.g. device__attribute_display_name) that do not
     # fit the float dict above.
     str_metrics: dict[str, str] = field(default_factory=dict)
-    # The device the profile ran on, resolved from the profile itself.
-    device: Device | None = None
+    # The device the profile ran on, as reported by the profile itself.
+    device_name: str | None = None
     # Phase 2: when the input is an .ncu-rep, NVIDIA's own section rows and
     # rule results ride along untouched, rendered with their source label.
     ncu_sections: list[Section] = field(default_factory=list)

@@ -231,11 +231,9 @@ td.u{color:var(--faint);font-size:11px;text-align:right;padding-left:2px;white-s
 .rule .focus{margin-top:5px;font-size:11px;color:var(--faint);display:flex;flex-wrap:wrap;gap:4px 12px}
 .rule .focus b{color:var(--dim);font-weight:600}
 .rule .focus .fhint{color:var(--faint)}
-.derived-sec{display:none}
 .toggle{color:var(--dim);font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:7px;user-select:none}
 .toggle:hover{color:var(--text)}
 .toggle input{accent-color:var(--accent);cursor:pointer}
-.nav-item.derived-item{display:none}
 .badges{display:flex;gap:6px;margin-left:auto;flex:0 0 auto;flex-wrap:wrap}
 .badge{font-size:9.5px;padding:2px 8px;border-radius:9px;font-weight:700;letter-spacing:.3px;white-space:nowrap;text-transform:uppercase}
 .badge.sev{color:var(--text)}
@@ -366,72 +364,6 @@ function secHtml(s){
     <span class="meta">${s.src?`<span class="src-tag">${esc(s.src)}</span>`:''}${nrows?`<span class="rows">${nrows}</span>`:''}</span></div>
     <div class="sec-body">${s.desc?`<div class="desc">${esc(s.desc)}</div>`:''}${body}</div></div>`;
 }
-function heroSec(s,title){
-  return `<div class="sec" id="sec-${esc(s.sid)}" data-sid="${esc(s.sid)}">
-    <div class="sec-head"><span class="chev">▼</span><span class="sic">${SECT_SID_ICON[s.sid]||'▦'}</span><h3>${esc(title||s.title)}</h3>
-    <span class="meta">${s.src?`<span class="src-tag">${esc(s.src)}</span>`:''}</span></div>
-    <div class="sec-body">`;
-}
-function solSectionHtml(k){
-  const sec=k.sections.find(s=>s.sid==='speedoflight');
-  if(!sec)return '';
-  const rows=sec.rows.filter(r=>r.bar!=null);
-  const compute=rows.find(r=>/tensor/i.test(r.label))||rows[0];
-  const memory=rows.find(r=>/dram/i.test(r.label));
-  let out=heroSec(sec,'GPU Speed Of Light Throughput');
-  if(compute)out+=solRow(compute.label,compute.bar,true);
-  if(memory)out+=solRow(memory.label,memory.bar,true);
-  out+='<div style="margin-top:8px">'+rows.filter(r=>r!==compute&&r!==memory).map(r=>solRow(r.label,r.bar)).join('')+'</div>';
-  out+=`<div class="desc" style="margin-top:10px">${esc(sec.description||'')}</div></div></div>`;
-  return out;
-}
-function stallDonut(rows){
-  const tot=rows.reduce((a,r)=>a+r.bar,0)||1;
-  const r=30,cx=40,cy=40,circ=2*Math.PI*r;
-  let acc=0,segs='';
-  rows.forEach((seg,i)=>{
-    const frac=seg.bar/tot;
-    const off=acc*circ, len=frac*circ;
-    segs+=`<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${STALLPALETTE[i%STALLPALETTE.length]}"
-      stroke-width="11" stroke-dasharray="${len} ${circ-len}" stroke-dashoffset="${-off}" transform="rotate(-90 ${cx} ${cy})">
-      <title>${esc(seg.label)}: ${fmt(seg.bar,1)}%</title></circle>`;
-    acc+=frac;
-  });
-  return `<svg width="80" height="80" viewBox="0 0 80 80">
-    <circle cx="${cx}" cy="${cy}" r="20" fill="none" stroke="var(--line)" stroke-width="0.5" stroke-dasharray="1 2"/>
-    <text x="${cx}" y="${cy+3}" text-anchor="middle" font-size="9" font-weight="700" fill="var(--text)">${fmt(rows.reduce((a,r)=>a+r.bar,0),0)}%</text>
-    ${segs}</svg>`;
-}
-function warpStateHtml(k){
-  const sec=k.sections.find(s=>s.sid==='warpstate');
-  if(!sec)return '';
-  const rows=sec.rows.filter(r=>r.bar!=null);
-  if(!rows.length)return secHtml(sec);
-  const tot=rows.reduce((a,r)=>a+r.bar,0)||1;
-  const segs=rows.map((r,i)=>`<div class="stack-seg" title="${esc(r.label)}: ${fmt(r.bar,1)}%"
-    style="width:${r.bar/tot*100}%;background:${STALLPALETTE[i%STALLPALETTE.length]}"></div>`).join('');
-  const legend=rows.map((r,i)=>`<span class="li"><span class="sw" style="background:${STALLPALETTE[i%STALLPALETTE.length]}"></span>${esc(r.label)} · ${fmt(r.bar,1)}%</span>`).join('');
-  return heroSec(sec,'Warp State')+`<div class="wrap"><div class="warp-main">
-    <div class="stack-track">${segs}</div><div class="legend">${legend}</div></div>
-    <div class="donut">${stallDonut(rows)}</div></div>
-    <table><tbody>${rows.map(rowHtml).join('')}</tbody></table>
-    <div class="desc" style="margin-top:10px">${esc(sec.description||'')}</div></div></div>`;
-}
-function occupancyHtml(k){
-  const occ=k.sections.find(s=>s.sid==='occupancy');
-  if(!occ)return '';
-  const achieved=occ.rows.find(r=>/achieved/i.test(r.label)&&r.bar!=null);
-  const theo=occ.rows.find(r=>/theoretical/i.test(r.label));
-  let out=heroSec(occ,'Occupancy');
-  if(achieved)out+=`<div class="occ-hero"><div class="l">${esc(achieved.label)}</div>
-    <div class="bar-track" style="height:16px"><div class="bar" style="width:${Math.min(achieved.bar,100)}%;background:${BARCOL(achieved.bar)}"></div></div>
-    <div class="pct num" style="color:${BARCOL(achieved.bar)}">${fmt(achieved.bar,1)}%</div></div>`;
-  if(theo)out+=`<div class="theo">${esc(theo.label)}: ${esc(theo.value)}${theo.unit||''}</div>`;
-  const rest=occ.rows.filter(r=>r!==achieved&&r!==theo);
-  if(rest.length)out+='<table style="margin-top:8px"><tbody>'+rest.map(rowHtml).join('')+'</tbody></table>';
-  out+='</div></div>';
-  return out;
-}
 function focusEvidence(r){
   const info=r.focus_info||{};
   const parts=Object.keys(r.focus||{}).map(n=>`${esc(n)}: <b>${fmt(r.focus[n],3)}</b>${info[n]?` <span class="fhint">(${esc(info[n])})</span>`:''}`);
@@ -456,17 +388,15 @@ function rulesHtml(rules,title){
     </div>`).join('');
   return `<div class="rules"><h2>${esc(title)}</h2>${items}</div>`;
 }
-function statChip(l,v,unit,sub,trend){
+function statChip(l,v,unit,sub,trend,note){
   const c=trend==='up'?'var(--crit)':trend==='down'?'var(--good)':'var(--faint)';
+  const subHtml=sub!=null?`<div class="sub">${fmt(sub,1)}% of peak</div>`
+    :(v==null&&note)?`<div class="sub" title="${esc(note)}">n/a — reason on hover</div>`:'';
   return `<div class="stat" style="--stat:${BARCOL(sub!=null?sub:0)}"><div class="l">${esc(l)}</div>
-    <div class="v num" title="click to copy">${v==null?'—':esc(v)}${unit?`<small> ${esc(unit)}</small>`:''}</div>
-    ${sub!=null?`<div class="sub">${fmt(sub,1)}% of peak</div>`:''}
+    <div class="v num" title="${note?esc(note):'click to copy'}">${v==null?'—':esc(v)}${unit?`<small> ${esc(unit)}</small>`:''}</div>
+    ${subHtml}
     ${trend?`<span class="trend" style="color:${c}">${trend==='up'?'▲':trend==='down'?'▼':'—'}</span>`:''}</div>`;
 }
-
-const NVIDIA_COVER={SpeedOfLight:'speedoflight',SchedulerStats:'schedulerstats',
-  WarpStateStats:'warpstate',ComputeWorkloadAnalysis:'computeworkload',
-  MemoryWorkloadAnalysis_Tables:'memoryworkload',Occupancy:'occupancy','PM Sampling':'pmsampling'};
 
 function trendFor(idx,metric,higherIsGood){
   const cur=DATA.series[idx],prev=DATA.series[idx-1];
@@ -481,9 +411,8 @@ function kernelPage(k){
   const s=k.stats||{};const v=k.verdict;const idx=DATA.series.findIndex(x=>x.key===k.key);
   const strip=statChip('Duration',s.time_us!=null?fmt(s.time_us,0):null,'µs')
     +statChip('SM clock',s.clock_ghz!=null?fmt(s.clock_ghz,3):null,'GHz')
-    +statChip('Tensor TFLOPS',s.tflops!=null?fmt(s.tflops,1):null,'TF/s',s.pipe_pct!=null?s.pipe_pct:null)
     +statChip('Tensor pipe',s.pipe_pct!=null?fmt(s.pipe_pct,1):null,'%',s.pipe_pct)
-    +statChip('DRAM bandwidth',s.dram_pct!=null?fmt(s.dram_pct,1):null,'%',s.dram_pct)
+    +statChip('DRAM Throughput',s.dram_pct!=null?fmt(s.dram_pct,1):null,'%',s.dram_pct)
     +statChip('Achieved occupancy',s.occupancy_pct!=null?fmt(s.occupancy_pct,1):null,'%',s.occupancy_pct)
     +statChip('Stall / issue',s.stall_cycles!=null?fmt(s.stall_cycles,2):null,'cyc',null,trendFor(idx,'stall_cycles',false));
   const banner=v?`<div class="verdict sev-${esc(v.severity)}">
@@ -492,59 +421,21 @@ function kernelPage(k){
         <div class="m">${esc(v.message)}</div>
         ${focusEvidence(v)}</div>
       <span class="badge sev sev-${esc(v.severity)}" style="flex:0 0 auto">${SEVNAME[v.severity]||v.severity}</span></div>`:'';
-  const ncu=k.ncu_sections||[];
-  const detailed=ncu.filter(x=>x.detailed);
-  const oneliners=ncu.filter(x=>!x.detailed);
-  const detOurs=new Set(detailed.map(d=>NVIDIA_COVER[d.sid]).filter(Boolean));
-  const heroes={speedoflight:solSectionHtml(k),warpstate:warpStateHtml(k),occupancy:occupancyHtml(k)};
-  const primaryOurs=k.sections.filter(s=>!detOurs.has(s.sid)).map(sid=>heroes[sid.sid]||secHtml(sid)).join('');
-  const hiddenOurs=k.sections.filter(s=>detOurs.has(s.sid)).map(sid=>heroes[sid.sid]||secHtml(sid)).join('');
-  const derivedBlock=hiddenOurs?`<div class="derived-sec" data-derived="1">${hiddenOurs}</div>`:'';
-  const toggle=hiddenOurs?`<div style="text-align:right;margin-bottom:10px">
-    <label class="toggle"><input type="checkbox" id="derived-toggle"> show derived (ours)</label></div>`:'';
-  const ourRules=k.rules.filter(r=>r.rid!=='verdict');
+  const secs=k.sections||[];
+  const sections=secs.length?secs.map(secHtml).join('')
+    :'<div class="desc">No NVIDIA sections for this input — export them with '
+     +'<code>ncu --import &lt;rep&gt; --section &lt;X&gt; --csv</code> (see the README).</div>';
   return `<div class="stats">${strip}</div>${banner}
-    ${rulesHtml(k.ncu_rules,'Recommendations (NVIDIA rule engine)')}
-    ${rulesHtml(ourRules,'Recommendations (ncu-view rules)')}
-    ${toggle}
-    ${detailed.map(secHtml).join('')}
-    ${primaryOurs}
-    ${derivedBlock}
-    ${oneliners.map(secHtml).join('')}`;
+    ${rulesHtml(k.rules,'Recommendations (NVIDIA rule engine)')}
+    ${sections}`;
 }
 function miniBar(v,color){
   if(v==null)return '<div class="mini"><span class="mv">—</span></div>';
   return `<div class="mini"><div class="mt"><div class="bar-track"><div class="bar" style="width:${Math.min(v,100)}%;background:${color||BARCOL(v)}"></div></div></div><span class="mv">${fmt(v,1)}%</span></div>`;
 }
-function seriesChart(){
-  const series=DATA.series.filter(r=>r.tflops!=null);
-  if(series.length<2)return '';
-  const W=720,H=180,pad={l:46,r:14,t:14,b:26};
-  const iw=W-pad.l-pad.r,ih=H-pad.t-pad.b;
-  const max=Math.max(...series.map(r=>r.tflops))*1.12;
-  const x=i=>pad.l+iw*(series.length===1?0.5:i/(series.length-1));
-  const y=t=>pad.t+ih*(1-t/max);
-  const step=Math.ceil(max/5),labels=[];
-  for(let g=0;g<=max;g+=step)labels.push(g);
-  let grid=labels.map(g=>`<line class="gridline" x1="${pad.l}" y1="${y(g)}" x2="${W-pad.r}" y2="${y(g)}"/><text class="axis" x="${pad.l-6}" y="${y(g)+3}" text-anchor="end">${fmt(g,0)}</text>`).join('');
-  const pts=series.map((r,i)=>[x(i),y(r.tflops)]);
-  const path=pts.map((p,i)=>i===0?`M${p[0]},${p[1]}`:`L${p[0]},${p[1]}`).join(' ');
-  const area=path+` L${pts[pts.length-1][0]},${pad.t+ih} L${pts[0][0]},${pad.t+ih} Z`;
-  const dots=pts.map((p,i)=>`<circle class="spark-dot" cx="${p[0]}" cy="${p[1]}" r="3.5"><title>${esc(series[i].name)}: ${fmt(series[i].tflops,1)} TF/s</title></circle>`).join('');
-  const xlab=series.map((r,i)=>`<text class="axis" x="${x(i)}" y="${H-8}" text-anchor="middle">${esc(r.name.length>12?r.name.slice(0,11)+'…':r.name)}</text>`).join('');
-  return `<div class="chart-card"><h3>Tensor TFLOPS across the series</h3>
-    <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="TFLOPS across kernels">
-      ${grid}
-      <defs><linearGradient id="sg" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0" stop-color="var(--accent)" stop-opacity=".25"/><stop offset="1" stop-color="var(--accent)" stop-opacity="0"/></linearGradient></defs>
-      <path d="${area}" fill="url(#sg)"/>
-      <path d="${path}" class="spark"/>
-      ${dots}${xlab}
-    </svg></div>`;
-}
 function summaryPage(){
   const series=DATA.series||[];
-  const best=series.filter(r=>r.tflops!=null).sort((a,b)=>b.tflops-a.tflops)[0];
+  const best=series.slice().sort((a,b)=>(a.time_us??Infinity)-(b.time_us??Infinity))[0];
   let rows='';
   series.forEach(r=>{
     const k=DATA.kernels.find(x=>x.key===r.key);
@@ -553,7 +444,6 @@ function summaryPage(){
     rows+=`<tr>
       <td class="l"><b>${esc(r.name)}</b></td>
       <td class="v num">${r.time_us!=null?fmt(r.time_us,0):'—'}</td>
-      <td class="v num">${r.tflops!=null?fmt(r.tflops,1):'—'}</td>
       <td>${miniBar(r.pipe_pct)}</td>
       <td>${miniBar(r.dram_pct)}</td>
       <td>${miniBar(r.occupancy_pct)}</td>
@@ -562,8 +452,7 @@ function summaryPage(){
     </tr>`;
   });
   const sevColor=s=>s==='critical'?'var(--crit)':s==='warning'?'var(--warn)':s==='suggestion'?'var(--accent)':'var(--info)';
-  const recs=DATA.kernels.map(k=>k.rules.filter(r=>r.rid!=='verdict').map(r=>({...r,kname:k.name}))).flat()
-    .concat(DATA.kernels.map(k=>(k.ncu_rules||[]).map(r=>({...r,kname:k.name}))).flat())
+  const recs=DATA.kernels.map(k=>k.rules.map(r=>({...r,kname:k.name}))).flat()
     .sort((a,b)=>(SEV[a.severity]??9)-(SEV[b.severity]??9));
   const recHtml=recs.map(r=>`<div class="verdict-row">
       <span class="dot" style="background:${sevColor(r.severity)}"></span>
@@ -575,13 +464,11 @@ function summaryPage(){
         <span class="badge src${r.source==='ncu'?' ncu':''}">${esc(r.source)}</span></div></div>`).join('');
   return `<div class="sum-hero">${statChip('Kernels profiled',DATA.kernels.length)}
     ${statChip('Best kernel',best?best.name:'—')}
-    ${statChip('Best TFLOPS',best&&best.tflops!=null?fmt(best.tflops,1):null,'TF/s')}
     ${statChip('Best duration',best&&best.time_us!=null?fmt(best.time_us,0):null,'µs')}</div>
-    ${seriesChart()}
     <div class="rules"><h2>Prioritized recommendations (all kernels)</h2>${recHtml||'<div class="desc">No recommendations.</div>'}</div>
     <div class="sec"><div class="sec-head"><span class="chev">▼</span><span class="sic">▤</span><h3>Kernel series</h3></div>
     <div class="sec-body"><table><thead><tr>
-      <th>Kernel</th><th style="text-align:right">Duration µs</th><th style="text-align:right">TFLOPS</th>
+      <th>Kernel</th><th style="text-align:right">Duration µs</th>
       <th>Tensor pipe</th><th>DRAM</th><th>Occupancy</th><th style="text-align:right">Stall/issue</th><th>Verdict</th>
     </tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
@@ -592,7 +479,7 @@ function renderMain(){
   const k=DATA.kernels.find(x=>x.key===curKernel);
   if(!k)return;
   main.innerHTML=kernelPage(k);
-  bindCollapse();bindDerived();bindCopy();spy();markActive();
+  bindCollapse();bindCopy();spy();markActive();
 }
 function markActive(){
   $$('#sidebar .nav-item').forEach(x=>x.classList.remove('active'));
@@ -603,13 +490,10 @@ function markActive(){
 function applyFilter(){
   const k0=DATA.kernels[0];
   const list=DATA.kernels.filter(k=>!searchQ||k.name.toLowerCase().includes(searchQ.toLowerCase()));
-  const detOurs=new Set((k0?(k0.ncu_sections||[]):[]).filter(s=>s.detailed).map(s=>NVIDIA_COVER[s.sid]).filter(Boolean));
-  const own=k0?k0.sections.map(s=>({sid:s.sid,title:s.title,c:['sol','warpstate','occupancy','launchstats','memory','compute'].includes(s.sid)?'var(--accent)':'var(--faint)',ncu:false,derived:detOurs.has(s.sid)})):[];
-  const theirs=k0?(k0.ncu_sections||[]).map(s=>({sid:s.sid,title:s.title,c:'var(--accent)',ncu:true,derived:false})):[];
   const kn=list.map(k=>{const v=k.verdict;
     const c=v?(v.severity==='critical'?'var(--crit)':v.severity==='warning'?'var(--warn)':'var(--accent)'):'var(--faint)';
     return `<div class="nav-item" data-view="kernel" data-key="${esc(k.key)}"><span class="dot" style="background:${c}"></span>${esc(k.name)}</div>`;}).join('');
-  const secs=[...own,...theirs].map(s=>`<div class="nav-item section-item${s.derived?' derived-item':''}" data-sec="${esc(s.sid)}" data-key="__sec__"><span class="sec">▸</span>${esc(s.title)}${s.ncu?'<span class="k">NVIDIA</span>':''}</div>`).join('');
+  const secs=(k0?(k0.sections||[]):[]).map(s=>`<div class="nav-item section-item" data-sec="${esc(s.sid)}" data-key="__sec__"><span class="sec">▸</span>${esc(s.title)}<span class="k">NVIDIA</span></div>`).join('');
   const sb=$('#sidebar');
   if(!sb)return;
   sb.innerHTML='<h5>Kernels<span class="cnt">'+DATA.kernels.length+'</span></h5>'
@@ -635,12 +519,6 @@ function bindCollapse(){
     if(sid){try{const saved=JSON.parse(store.get('ncu-view-collapsed')||'[]');const set=new Set(saved);
       on?set.add(sid):set.delete(sid);store.set('ncu-view-collapsed',JSON.stringify([...set]));}catch(e){}}
   }));
-}
-function bindDerived(){
-  const t=$('#derived-toggle');
-  if(!t)return;
-  const apply=show=>{$$('.derived-sec').forEach(x=>{x.style.display=show?'block':'none';});$$('#sidebar .derived-item').forEach(x=>{x.style.display=show?'':'none';});};
-  t.addEventListener('change',()=>apply(t.checked));
 }
 function bindCopy(){
   $$('.stat .v').forEach(el=>el.addEventListener('click',()=>copyText(el.textContent.trim())));

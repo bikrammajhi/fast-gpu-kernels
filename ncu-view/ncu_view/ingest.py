@@ -697,19 +697,44 @@ def ingest_report(path: str | Path, kernel: str | None = None) -> list[KernelPro
 
 
 def _attach_device(kp: KernelProfile) -> None:
-    """Resolve the device spec from the profile's own counters."""
-    from .gpus import detect_device
-
+    """Record the device name the profile reports for itself."""
     attrs: dict[str, object] = {
         k: v for k, v in kp.metrics.items()
         if k.startswith("device__attribute_")
     }
     attrs.update(kp.str_metrics)
     name = attrs.get("device__attribute_display_name")
-    kp.device = detect_device(
-        name=str(name) if name is not None else None,
-        attributes={k: v for k, v in attrs.items() if v is not None},
-    )
+    kp.device_name = str(name) if name is not None else None
+
+
+def dram_pct_of_peak(kp: KernelProfile) -> float | None:
+    """NVIDIA's own DRAM utilization vs peak.
+
+    Priority: the pct_of_peak_sustained counter ncu reports directly, else
+    the "DRAM Throughput" row of NVIDIA's Speed Of Light section. Never a
+    division by a hardcoded spec - the peak comes from the profile itself.
+    """
+    v = kp.metrics.get("dram__throughput.avg.pct_of_peak_sustained_elapsed")
+    if v is not None:
+        return v
+    for sec in kp.ncu_sections:
+        if sec.sid != "SpeedOfLight":
+            continue
+        for r in sec.rows:
+            if r.label == "DRAM Throughput":
+                try:
+                    return float(r.value)
+                except (TypeError, ValueError):
+                    return None
+    return None
+
+
+def stall_total(kp: KernelProfile) -> float | None:
+    """Total warp-stall cycles per issued instruction (NVIDIA's metric:
+    the sum of its per-reason stall counters)."""
+    vals = [kp.metrics.get(b) for b in STALL_BASES]
+    vals = [x for x in vals if x is not None]
+    return sum(vals) if vals else None
 
 
 def ingest(path: str | Path, kernel: str | None = None) -> list[KernelProfile]:

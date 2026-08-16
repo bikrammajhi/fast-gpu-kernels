@@ -91,14 +91,15 @@ Operating notes for AI agents working in this repo. Read before making changes.
   failure (ncu run AND `ncu --import raw` — SystemExit/called-process errors
   in the container weren't serialized and the client died with empty output).
   The client prints the error dict and exits 1.
-- **ncu launch selection:** default `launch_skip=None` profiles EVERY
-  launch in one pass (`--launch-count 100000 --launch-skip 0` — same replay
-  count as count 1, since ncu replays once per counter pass). `ingest`
-  dedupes by kernel name (last occurrence = steady state), drops runtime
-  plumbing (tensor-pipe util < 5% — torch init/compare, device query,
-  memcpy; `NOISE_TENSOR_PCT`/`NOISE_NAMES` in `ingest.py`), and the report
-  JS stars the dominant kernel (max time_us). Explicit `--launch-skip N`
-  still forces a single launch.
+- **ncu launch selection:** default profiles ONE kernel (`--launch-skip 1
+  --launch-count 1` — warmup skipped) so sweep benchmarks with hundreds of
+  launches stay cheap; ncu replays the whole app once per counter pass
+  regardless, so `launch_count` > 1 costs no extra replays. Explicit
+  `--launch-skip N` lands on a specific launch. `ingest` dedupes by kernel
+  name (last occurrence = steady state), drops runtime plumbing
+  (tensor-pipe util < 5% — torch init/compare, device query, memcpy;
+  `NOISE_TENSOR_PCT`/`NOISE_NAMES` in `ingest.py`), and the report
+  JS stars the dominant kernel (max time_us).
 - **`profile` command verified end-to-end on Modal** for all four kernel
   kinds — raw CUDA (`cuda/A100/matmul_v1.cu` + `benchmark.cu` via
   `--build-cmd`), CUTE C++ (`cute/H100/matmul_v1.cu`), CUTLASS C++
@@ -112,26 +113,48 @@ Operating notes for AI agents working in this repo. Read before making changes.
 
 ## Architecture decisions (user-approved)
 
-- **NVIDIA-first rendering**: when NVIDIA's detailed section table exists
-  (`Section.detailed`), it is the primary section; our derived section for that
-  topic is hidden behind the "show derived (ours)" checkbox
-  (`#derived-toggle` toggles `.derived-sec`, sidebar `.derived-item`). Derived
-  data stays in the report JSON. Our derivations are used only where NVIDIA has
-  nothing. `NVIDIA_COVER` in `html.py` maps NVIDIA sid → our covered sid.
+- **Official NVIDIA data only** (user decision, this session): the report
+  renders NVIDIA's own exported section tables and NVIDIA's own rule-engine
+  results verbatim — nothing derived, nothing of ours. Our derived sections
+  (`sections.py`) and our rules/decision-table verdict (`rules.py`) were
+  DELETED; the per-kernel banner verdict IS NVIDIA's SOLBottleneck rule
+  (`_ncu_verdict` in `report.py`, fallback: highest-severity NVIDIA rule).
+  `kernels[].sections` = `ncu_sections`, `kernels[].rules` = `ncu_rules`
+  (there are no `ncu_sections`/`ncu_rules` keys anymore).
+- Summary chips are NVIDIA counters read verbatim: pct-of-peak values are
+  ncu's own `pct_of_peak_sustained_*`; SM clock prefers the SOL "SM
+  Frequency" row, else ncu's own formula (`sm__cycles_elapsed.avg /
+  gpu__time_duration.avg` — `_sm_freq` in `report.py`); stall is NVIDIA's
+  metric — the sum of its per-reason stall counters (`stall_total` in
+  `ingest.py`).
+- Inputs with no NVIDIA sections (raw CSV, counters JSON) render chips + an
+  honest "No NVIDIA sections for this input" note — nothing invented.
 - Sections are rendered client-side from embedded JSON via JS template
   literals in `html.py` (`kernelPage`, `secHtml`, `rulesHtml`) — `data-sid`,
   `sec-<sid>` ids appear in the RENDERED DOM only after `document.ready()`;
   jsdom checks MUST wait (setTimeout ~400ms) or sections read as missing.
 - NVIDIA rule messages get "Focus metrics: name: value (info)" evidence from
   `focus_metrics[].info` (`_ncu_rules_new` in `ingest.py`).
-- Verdict: our "LATENCY-BOUND" == NVIDIA "Latency Issue" mapping (B200 device
-  auto-detect: 2250 TFLOPS / 8000 GB/s).
+- **No device or shape values are assumed; no TFLOPS; no GPU catalog.** The
+  report is bottleneck-focused (NVIDIA verdict + pipe/DRAM/occupancy/stall
+  chips + NVIDIA sections); TFLOPS was removed by user decision (Sept
+  session) — `--M` survives only as the `--compare-cublas` GEMM shape. The
+  hardcoded device catalog (`gpus.py`, `--gpu`, `--config`,
+  `CONFIG_DEFAULTS`) was deleted by user decision (Oct session): every
+  "% of peak" (DRAM, pipe, occupancy) is NVIDIA's own
+  `pct_of_peak_sustained` value from the profile — DRAM via
+  `dram_pct_of_peak` in `ingest.py` (the raw counter when present, else the
+  Speed Of Light "DRAM Throughput" row of the exported NVIDIA section). ncu
+  computes peaks from the device at profile time, so nothing is divided by a
+  hardcoded spec. Reference for all features: NVIDIA's Nsight Compute
+  Profiling Guide,
+  https://docs.nvidia.com/nsight-compute/ProfilingGuide/index.html.
 
 ## Commands
 
 ```bash
 cd ncu-view
-python3 -m pytest tests/ -q                # 41 tests (all pass)
+python3 -m pytest tests/ -q                # 32 tests (all pass)
 python3 tests/test_against_ncu.py ../kernels/cute_dsl/B200/results/golden/matmul_v1.ncu-rep \
     ../kernels/cute_dsl/B200/results/golden/matmul_v1.raw.csv   # ingest-vs-ncu harness, expects "OK:"
 ```
@@ -146,7 +169,7 @@ from ncu_view.ingest import ingest
 from ncu_view.report import build
 from ncu_view.html import render_html
 base = '../kernels/cute_dsl/B200/results/golden/matmul_v1'
-r = build(base + '.ncu-rep')
+r = build(base + '.ncu-rep')  # NVIDIA sections/rules come from the sibling sec-*.csv
 open(base + '.html', 'w').write(render_html(r))
 open(base + '.json', 'w').write(json.dumps(r, indent=1))
 EOF
@@ -163,25 +186,28 @@ modal run -m ncu_view.modal_app::_extract_sections \
 
 UI verification via jsdom: wait 400ms after load, then assert
 `#sec-<NVIDIA sid>` present with `.src-tag` = NVIDIA, rows in
-`.sec-body td.l`, `.derived-sec` display none → block after
-`#derived-toggle` click, sidebar `.nav-item.derived-item` hidden.
+`.sec-body td.l`, no `#derived-toggle`/`.derived-sec`/derived-item in the
+DOM, and the banner `.verdict` shows NVIDIA's rule name.
 
 ## Key files
 
 - `ncu-view/ncu_view/ingest.py` — `NCU_SECTION_TITLES`, `_ncu_section`,
   `_parse_sec_csv` (long-format + fallback), `_sec_csv_files`,
   `_apply_sec_csvs` (overlay replaces one-liner by sid, appends unknown sids,
-  marks `detailed`), `_ncu_rules_new` (focus_info).
+  marks `detailed`), `_ncu_rules_new` (focus_info), `dram_pct_of_peak`,
+  `stall_total`.
 - `ncu-view/ncu_view/modal_app.py` — image, volume, `_run_ncu_sections`,
   `_profile_source` (GPU), `_extract_sections`/`extract_sections` (CPU),
   `profile_on_modal`. NOTE: `_profile_source` still returns bytes via `.remote()`
   — port it to the volume-mount write path when touched.
 - `ncu-view/ncu_view/profile.py` — `NCU_DETAIL_SECTIONS`, `NCU_SID_ALIAS`,
   `_sec_filename`, `_export_sections_locally`, run-cmd guessing.
-- `ncu-view/ncu_view/html.py` — `NVIDIA_COVER`, `kernelPage` (NVIDIA-first),
-  `bindDerived`, `focusEvidence`/`rulesHtml`, sidebar derived-item.
-- `ncu-view/ncu_view/{model,report}.py` — `Section.detailed`,
-  `RuleResult.focus_info`, dict serialization.
+- `ncu-view/ncu_view/html.py` — `kernelPage` (NVIDIA-only: chips + banner +
+  NVIDIA sections/rules), `secHtml`, `focusEvidence`/`rulesHtml`, sidebar
+  NVIDIA section items.
+- `ncu-view/ncu_view/report.py` — `_ncu_verdict` (SOLBottleneck rule,
+  fallback highest severity), `_sm_freq` (SOL "SM Frequency", else ncu's
+  formula), dict serialization. `sections.py`/`rules.py` were DELETED.
 - `ncu-view/tests/test_ncu_sections.py` — parser/overlay tests (fixture is the
   REAL ncu long-format CSV); `tests/test_render_html.py` — jsdom golden checks.
 

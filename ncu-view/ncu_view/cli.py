@@ -10,8 +10,9 @@ Inputs are results/ncu_counters.json, a raw ncu CSV (`ncu --page raw --csv`),
 or .ncu-rep report files (requires NVIDIA's ncu_report module). The command
 word may be omitted entirely: `ncu-view --path foo.ncu-rep` is `report`.
 
-Every derived number (TFLOPS, DRAM %, occupancy) is computed against the
-device detected from the profile itself; override with --gpu/--config.
+Every derived number is NVIDIA's own: DRAM % and occupancy come from the
+profile's pct_of_peak_sustained counters (see the Nsight Compute Profiling
+Guide, https://docs.nvidia.com/nsight-compute/ProfilingGuide/index.html).
 """
 
 from __future__ import annotations
@@ -48,20 +49,14 @@ def _print_summary(report: dict) -> None:
     meta = report["meta"]
     dev = meta.get("device") or {}
     print(f"ncu-view {__version__} — {meta['input']} ({meta['source']})")
-    devname = dev.get("name") or "unknown"
-    if not dev.get("detected"):
-        devname += " (not recorded; defaults used)"
-    elif not dev.get("matched"):
-        devname += " (not in catalog; generic peaks — use --gpu)"
-    print(f"device: {devname}")
+    print(f"device: {dev.get('name') or 'unknown'}")
     print()
-    hdr = (f"{'kernel':<34}{'time (µs)':>12}{'TFLOPS':>10}"
+    hdr = (f"{'kernel':<34}{'time (µs)':>12}"
            f"{'pipe %':>8}{'stall':>9}  top stall")
     print(hdr)
     for k in report["series"]:
         top = f"{k['top_stall']:.1f}" if k["top_stall"] is not None else "—"
         print(f"{k['name'][:33]:<34}{_fmt(k['time_us'], 12, 0, comma=True)}"
-              f"{_fmt(k['tflops'], 10, 1)}"
               f"{_fmt(k['pipe_pct'], 8, 1)}"
               f"{_fmt(k['stall_cycles'], 9, 2)}  {top}")
     print()
@@ -100,20 +95,6 @@ def _serve(report: dict, port: int) -> None:
     http.server.HTTPServer(("0.0.0.0", port), Handler).serve_forever()
 
 
-def _parse_config(items: list[str]) -> dict:
-    cfg: dict = {}
-    for item in items or []:
-        if "=" not in item:
-            raise SystemExit(f"--config expects key=value, got {item!r}")
-        key, _, value = item.partition("=")
-        key = key.strip()
-        try:
-            cfg[key] = float(value) if "." in value else int(value)
-        except ValueError:
-            cfg[key] = value
-    return cfg
-
-
 def _kernel_name(input_path: Path) -> str:
     """The input's kernel name: file name minus known profile suffixes."""
     name = input_path.name
@@ -134,15 +115,13 @@ def _default_outdir(outdir: str | None, inputs: list[str]) -> Path:
 
 
 def _build_report(args: argparse.Namespace) -> dict:
-    cfg = {"M": args.M} if getattr(args, "M", None) else None
-    cfg = {**(cfg or {}), **_parse_config(getattr(args, "config", None) or [])}
     kfilter = None
     if getattr(args, "kernel_regex", None):
         kfilter = re.compile(args.kernel_regex)
 
-    report = build(args.inputs[0], cfg=cfg, gpu=getattr(args, "gpu", None))
+    report = build(args.inputs[0])
     for extra in args.inputs[1:]:
-        more = build(extra, cfg=cfg)
+        more = build(extra)
         report["kernels"] += more["kernels"]
         report["series"] += more["series"]
         report["meta"]["kernels"] = len(report["kernels"])
@@ -194,13 +173,10 @@ def main(argv: list[str] | None = None) -> int:
                          "<kernel>-ncu-report/ next to the input)")
     ap.add_argument("--kernel-regex", default=None,
                     help="only analyze kernels matching this regex")
-    ap.add_argument("--config", action="append", default=None, metavar="k=v",
-                    help="override a config key, e.g. --config M=4096 "
-                         "--config tensor_peak=1800 (repeatable)")
-    ap.add_argument("--gpu", default=None, metavar="NAME",
-                    help="force a device spec, e.g. --gpu 'H100 SXM'")
-    ap.add_argument("--M", type=int, default=None,
-                    help="matrix size for TFLOPS (default 8192)")
+    ap.add_argument("--M", type=int, default=None, metavar="N",
+                    help="profile: square GEMM size for the --compare-cublas "
+                         "reference run (required with --compare-cublas; "
+                         "irrelevant otherwise)")
     ap.add_argument("--open", action="store_true",
                     help="open the report in the browser")
     ap.add_argument("--port", type=int, default=8000,
@@ -214,22 +190,22 @@ def main(argv: list[str] | None = None) -> int:
                     help="profile: Modal accelerator, e.g. H100, B200 "
                          "(default H100)")
     ap.add_argument("--launch-skip", type=int, default=None, metavar="N",
-                    help="profile: ncu launch skip (default: auto — every "
-                         "launch is profiled in one pass and the report "
-                         "stars the dominant kernel; pass N to force a "
-                         "specific launch)")
+                    help="profile: ncu launch skip (default 1: skip the "
+                         "first warmup launch and profile ONE kernel; pass "
+                         "N to land on a specific launch)")
     ap.add_argument("--launch-count", type=int, default=1, metavar="N",
-                    help="profile: ncu launches to capture; >1 averages "
+                    help="profile: ncu launches to capture (default 1 — one "
+                         "kernel at a time); >1 averages "
                          "gpu__time_duration over steady-state launches "
                          "(default 1)")
-    ap.add_argument("--clock-control", default="boost",
+    ap.add_argument("--clock-control", default="base",
                     choices=("none", "base", "boost"),
                     help="profile: ncu clock control for the capture. ncu's "
-                         "default 'base' locks the GPU to its base clock, "
-                         "which understates steady-state throughput by "
-                         "~30-45%%; 'boost' locks the max boost clock (the "
-                         "reproducible peak reviewers expect) and 'none' "
-                         "lets the app's warm-up drive clocks (default boost)")
+                         "own default 'base' locks the GPU to its base clock; "
+                         "'boost' locks the max boost clock (the reproducible "
+                         "peak reviewers expect, where the host allows it) "
+                         "and 'none' lets the app's warm-up drive clocks "
+                         "(default base — ncu's own default)")
     ap.add_argument("--compare-cublas", action="store_true",
                     help="profile: also profile a cuBLAS GEMM in the same "
                          "run under identical ncu flags, so the report's "

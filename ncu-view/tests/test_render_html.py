@@ -60,17 +60,14 @@ const main = els['#main'].innerHTML;
 const sb = els['#sidebar'].innerHTML;
 const KERNELS = ['v1','v2','v3','v4','v5','v6','cuBLAS'];
 const checks = {};
-checks['stats strip'] = main.includes('Duration') && main.includes('Tensor TFLOPS');
-checks['verdict banner'] = main.includes('LATENCY-BOUND') &&
-  main.includes('verdict sev-');
-checks['recommendations'] = main.includes('Recommendations (ncu-view rules)');
-checks['SOL hero bars'] = main.includes('sol-hero') &&
-  main.includes('id="sec-speedoflight"');
-checks['warp stacked bar'] = main.includes('stack-track');
-checks['occupancy hero'] = main.includes('Achieved occupancy');
+checks['stats strip'] = main.includes('Duration') && main.includes('Tensor pipe');
+checks['no verdict invented'] = !main.includes('verdict sev-');
+checks['no nvidia sections'] = !main.includes('Recommendations (NVIDIA rule engine)');
+checks['honest fallback note'] = main.includes('No NVIDIA sections for this input');
+checks['achieved occupancy chip'] = main.includes('Achieved occupancy');
 checks['all kernels in sidebar'] = KERNELS.every(n => sb.includes(n));
 checks['summary nav'] = sb.includes('Summary');
-checks['sections tree'] = sb.includes('Launch Statistics');
+checks['no derived toggle'] = !main.includes('show derived');
 curView = 'summary'; renderMain();
 const summ = els['#main'].innerHTML;
 checks['summary series table'] = summ.includes('Kernel series') &&
@@ -86,15 +83,25 @@ console.log(ok ? '\\nALL RENDER CHECKS PASS' : '\\nRENDER FAILURES');
 GOLDEN_CHECKS = """
 document.ready();
 const main = els['#main'].innerHTML;
+const sb = els['#sidebar'].innerHTML;
 const checks = {};
-checks['launch grid/regs/smem'] = ['Grid size', 'Registers per thread',
-  'Shared mem'].every(s => main.includes(s));
-checks['theoretical occupancy'] = main.includes('Theoretical occupancy');
-checks['nvlink collected'] = main.includes('NvLink lanes (device)');
+checks['sol rows from nvidia'] = ['SM Frequency', 'DRAM Throughput']
+  .every(s => main.includes(s));
+checks['tensor pipe row'] = main.includes('Tensor pipe') ||
+  main.includes('Tensor Pipe Utilization');
+checks['warp stalls'] = main.includes('Stall Cycles Per Issued Instruction') ||
+  main.includes('Warp State');
+checks['nvidia rules block'] = main.includes('Recommendations (NVIDIA rule engine)');
+checks['bottleneck banner'] = main.includes('Bottleneck') &&
+  main.includes('verdict sev-');
 checks['pm nvidia detailed'] = ['Maximum Buffer Size', 'Maximum Sampling Interval']
   .every(s => main.includes(s));
-checks['derived hidden behind toggle'] = main.includes('derived-sec') &&
-  main.includes('show derived (ours)');
+checks['no derived toggle'] = !main.includes('show derived') &&
+  !main.includes('derived-sec');
+checks['no our verdicts'] = !main.includes('PIPE-BOUND') &&
+  !main.includes('LATENCY-BOUND');
+checks['sections tree nvidia'] = sb.includes('Speed Of Light') &&
+  sb.includes('Warp State Statistics');
 checks['zero not-collected'] = !main.includes('not collected');
 let ok = true;
 for (const [k, v] of Object.entries(checks)) {

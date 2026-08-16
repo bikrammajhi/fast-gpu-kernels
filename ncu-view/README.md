@@ -5,9 +5,9 @@ from any profile input, for any NVIDIA GPU, for any kind of CUDA kernel.
 
 Point it at an ncu profile and read the result like Nsight Compute's GUI: a
 **Summary** page with prioritized recommendations and a per-kernel
-**Details** page with Speed Of Light, Occupancy, Scheduler, Warp State,
-Compute/Memory Workload, Instruction, PM Sampling and NvLink sections —
-each with the kernel's bottleneck verdict.
+**Details** page with the sections NVIDIA itself exports — Speed Of Light,
+Occupancy, Scheduler, Warp State, Compute/Memory Workload, Instruction,
+PM Sampling and NvLink — and NVIDIA's rule-engine findings on top.
 
 Or point it at *source code* and it runs the kernel on your Modal account,
 profiles it with ncu, and renders the report — one command, no local ncu
@@ -18,16 +18,21 @@ installation needed.
 - **Any input, one report.** `.ncu-rep` (NVIDIA's own format, read via their
   `ncu_report` module), `ncu --page raw --csv` dumps, or our JSON — all
   produce the same HTML + JSON report.
-- **NVIDIA-first fidelity.** When the profile is a `.ncu-rep`, the report
+- **Official NVIDIA data only.** When the profile is a `.ncu-rep`, the report
   embeds NVIDIA's *own* detailed section tables (exported via
   `ncu --import <rep> --section <X> --csv`), labeled with a `NVIDIA` source
-  tag. Our derived analysis for the same topic stays in the report, hidden
-  behind a **"show derived (ours)"** toggle — NVIDIA's tables primary, ours
-  one click away. Our derivations are used only where NVIDIA has nothing.
-- **Device-accurate everywhere.** Peak specs (TFLOPS, DRAM bandwidth,
-  per-SM limits) come from the profile's own device attributes, so numbers
-  are right on any NVIDIA GPU: T4 → B300. You can also force a spec with
-  `--gpu` or override peaks with `--config tensor_peak=...`.
+  tag, and NVIDIA's rule-engine recommendations verbatim — including their
+  severity, message and focus metrics. Nothing of our own is computed or
+  layered on top: the per-kernel banner *is* NVIDIA's Speed Of Light
+  bottleneck rule. Inputs without exported sections (raw CSVs, counters
+  JSON) get the summary chips and an honest note that NVIDIA sections are
+  missing — never a fabricated section.
+- **NVIDIA-accurate everywhere.** Every "% of peak" (DRAM Throughput,
+  Tensor pipe, occupancy) is NVIDIA's own `pct_of_peak_sustained` value
+  from the profile — ncu computes peaks from the device itself at profile
+  time, so numbers are right on any NVIDIA GPU: T4 → B300. No device
+  specs are hardcoded or assumed; the device name is reported as the
+  profile states it.
 - **Profiles *any* kernel kind that ncu can profile:** raw CUDA (`.cu`),
   CUTE C++ (cute/tensor.hpp), CUTLASS C++, and the CuTe DSL Python drivers
   (`cutlass.cute`). Single files, directories, Makefile projects.
@@ -37,12 +42,9 @@ installation needed.
   (`-arch=sm_XXa`) and the CuTe DSL arch (`CUTE_DSL_ARCH`) are detected from
   the actual GPU automatically.
 - **Honest numbers.** Nothing is fabricated: rows read from ncu counters
-  verbatim; derived rows carry their formula in the report (tooltip);
-  counters never collected show `n/a (not collected)` — never a zero.
-- **Verdicts.** Each kernel gets a decision-table verdict: `LATENCY-BOUND`,
-  `PIPE-BOUND`, `ISSUE-SERIALIZATION`, `LOAD-PATH`, `COMPILER-OPACITY`,
-  `CONVERGED`/`CONVERGING`, or `REFERENCE` (cuBLAS) — computed from measured
-  counters and their deltas vs the previous kernel in the series.
+  verbatim; counters never collected show `n/a (not collected)` — never a
+  zero. The stall figure is NVIDIA's own metric — the sum of its per-reason
+  stall counters; the SM clock is NVIDIA's "SM Frequency" when exported.
 - **Self-contained output.** The HTML embeds the report JSON — open it from
   disk, email it, or serve it with `ncu-view serve`.
 
@@ -127,33 +129,32 @@ latest-tag clone (`/opt/cutlass`), with both `-I .../include` and
 `-I .../tools/util/include` (the `util` helpers — `print_error.hpp`,
 `GPU_Clock.hpp` — live under `tools/util` in 3.x and 4.x alike).
 
-Profiling auto-captures every launch in one pass (same replay count as
-profiling one — ncu replays once per counter pass) and the report stars
-the dominant kernel (max total time, the steady-state benchmark loop),
-so any app profiles correctly with no launch-order knowledge. Runtime
-plumbing (torch init/compare, device query, memcpy — anything that never
-drives the tensor pipe, <5% tensor-pipe utilization) is dropped
-(`noise_dropped` in the report meta). Pass `--launch-skip N` to force a
-specific launch; apps with fewer launches still profile (launch 0 is
-always captured). Tune with `--launch-skip N` /
-`--launch-count N` (`>1` averages
-`gpu__time_duration` over several steady-state launches).
+Profiling captures **one kernel** by default (warmup launch skipped): ncu
+replays the app once per counter pass, so a sweep benchmark with hundreds of
+launches stays cheap. `--launch-skip N` lands on a specific launch, and
+`--launch-count >1` averages `gpu__time_duration` over several
+steady-state launches. The run shows live progress: every step
+(container start, upload, ncu capture, raw CSV, NVIDIA sections) prints
+with elapsed time and a completion bar, so nothing runs dark — and if a
+step fails, the error is printed instead of dying silently.
 
-**Clock fairness.** ncu's own default is `--clock-control base`, which locks
-the GPU to its base clock during profiling — that understates steady-state
-throughput by ~30-45% (e.g. a kernel that does 1790 TF/s at boost reads
-~1215 TF/s at base). `ncu-view profile` therefore defaults to
-`--clock-control boost` (the reproducible peak number reviewers expect); use
-`--clock-control none` to let the app's own warm-up drive clocks, or `base`
-to reproduce vanilla ncu. If the host refuses `boost`, the run retries at
-`none` and the report's console notes it. Every kernel's measured SM clock
+**Clock fairness.** `ncu-view profile` defaults to `--clock-control base` —
+ncu's own default, so a plain run reproduces vanilla ncu exactly. Note that
+base locks the GPU to its base clock, which understates steady-state
+throughput vs boost (e.g. a kernel that does 1790 TF/s at boost reads
+~1215 TF/s at base). Pass `--clock-control boost` for the reproducible peak
+number reviewers expect (where the host allows it; if the host refuses
+`boost`, the run retries at `none` and the console notes it), or
+`--clock-control none` to let the app's own warm-up drive clocks. Every
+kernel's measured SM clock
 (`sm__cycles_elapsed / gpu__time_duration`) is shown on its stat strip, so
-each TFLOPS is self-documenting.
+the capture clock is self-documenting.
 
 **Fair cuBLAS baseline.** `--compare-cublas` additionally profiles a cuBLAS
 `cublasGemmEx` GEMM in the same run, under identical `--clock-control`,
-`--launch-skip`/`--launch-count` and shape (`--M`, default 8192) — both land
-in the same report series and TFLOPS chart, so your kernel and cuBLAS are
+`--launch-skip`/`--launch-count` and shape (`--M` — required, no assumed
+default) — both land
+in the same report series, so your kernel and cuBLAS are
 compared at the same clock. `--bench-precision fp16|bf16` matches the
 baseline's io dtype to your kernel (default fp16).
 
@@ -177,17 +178,24 @@ A100-80GB, RTX-PRO-6000, H100, H200, B200, B200+, B300). Two caveats:
 For a "reaching cuBLAS-like performance" claim the community expects numbers
 that are clock-fair, precision-matched and reproducible:
 
-- **Same, disclosed clock** — `--clock-control boost` (or locked `none`); the
+- **Same, disclosed clock** — the same `--clock-control` mode for every
+  kernel compared (default `base`); the
   report's per-kernel SM-clock chip makes the clock explicit so a base-clock
   capture can never be mistaken for a boost-clock one.
 - **Same precision** — fp16/bf16 have identical dense rate on Blackwell tensor
   cores, but the baseline's `--bench-precision` must match the kernel's dtype.
-- **Same shape & layout** — 8192³, fp32 accumulate, row-major, no sparsity.
-- **Steady state** — auto mode profiles every launch and the report stars
-  the dominant one; use `--launch-skip N` to skip warm-up or
+- **Same shape & layout** — 8192³ (the size you pass with `--M`), fp32
+  accumulate, row-major, no sparsity.
+- **Steady state** — one kernel is captured by default (warmup launch
+  skipped); use `--launch-skip N` to land on a specific launch or
   `--launch-count >1` and report min and mean±std, not a single snapshot.
-- **% of theoretical peak** — the report computes TFLOPS against the detected
-  device's dense peak (e.g. B200 = 2250 TF/s, so ~1770 TF/s ≈ 79%).
+- **% of peak** — the report's bottleneck rows (DRAM Throughput, tensor
+  pipe, occupancy) are NVIDIA's own `pct_of_peak_sustained` values from the
+  profile (ncu computes peaks from the device at profile time; when the raw
+  counter is absent, NVIDIA's Speed Of Light "DRAM Throughput" row is used).
+  Nothing is divided by a hardcoded spec; absent data degrades to an honest
+  `n/a` instead of a fabricated number. Reference: NVIDIA's Nsight Compute
+  Profiling Guide (https://docs.nvidia.com/nsight-compute/ProfilingGuide/index.html).
 - **Pinned toolchain** — the report records the device; pin CUTLASS/cute-dsl,
   CUDA, ncu and driver versions in the write-up.
 - **A same-condition cuBLAS baseline** — `--compare-cublas` benchmarks cuBLAS
@@ -220,29 +228,30 @@ on the Modal volume.
 
 ## Accuracy model
 
-- **tier 1** — rows read from ncu counters, verbatim.
-- **tier 2** — derived rows (TFLOPS, TMA %, DRAM %, IPC…) carry their
-  formula in the report (`derived` marker + tooltip) and are computed from
-  measured counters only, against the detected device's peak specs.
-- **tier 3** — rules. `our-rule` rows are documented heuristics; `NVIDIA rule`
-  rows are the rule engine from the `.ncu-rep` itself, shown alongside with
-  their "Focus metrics" evidence. Counters that were never collected show
-  `n/a (not collected)` — never a zero.
+Everything in the report is NVIDIA's own data, straight from the profile:
 
-## Verdicts
+- **Sections** — NVIDIA's exported section tables, verbatim, under the
+  `NVIDIA` source tag. A section that has no table rows (ncu printed
+  "No metrics to show") keeps NVIDIA's one-line description.
+- **Rules** — NVIDIA's rule-engine results from the `.ncu-rep` itself,
+  shown with their severity, message and "Focus metrics" evidence. Counters
+  that were never collected show `n/a (not collected)` — never a zero.
+- **Summary chips** — NVIDIA counters read verbatim: each "% of peak" is
+  ncu's own `pct_of_peak_sustained` value, the SM clock is NVIDIA's
+  "SM Frequency" (same formula from its own counters when not exported),
+  and the stall figure is NVIDIA's metric — the sum of its per-reason
+  stall counters.
+- **No tier 2 / tier 3 of our own.** No derived rows, no heuristics, no
+  decision table. Inputs that carry no NVIDIA sections (raw CSV dumps,
+  counters JSON) render the chips and an honest note — nothing invented.
 
-The per-kernel verdict is a decision table over the measured counters and
-their deltas vs the previous kernel in the series:
+## Verdict
 
-| verdict | reads as |
-|---|---|
-| LATENCY-BOUND | total stall > 80 cyc/issue, tensor pipe < 40% — waiting, not working |
-| COMPILER-OPACITY | more instructions while getting faster — layout facts hidden from the compiler |
-| PIPE-BOUND | pipe busy < 92%, nothing else saturated — per-tile overhead |
-| ISSUE-SERIALIZATION | stall total frozen while the pipe moved — issue-side serialization |
-| LOAD-PATH | stall 45–80, long-scoreboard ≥ 5%, pipe < 50% — the LSU path throttles |
-| CONVERGED / CONVERGING | pipe ≥ 90% and time flat — the plateau; caveat when the stall denominator moved |
-| REFERENCE | cuBLAS: the bar to compare the series against |
+The per-kernel banner is NVIDIA's Speed Of Light bottleneck rule
+("Bottleneck: Latency Issue" etc.), verbatim — the same verdict Nsight
+Compute's GUI shows. When the rule engine reported no SOL bottleneck, the
+banner shows NVIDIA's most severe rule for the kernel. There is no verdict
+of our own.
 
 ## CLI reference
 
@@ -255,10 +264,8 @@ common options
   -o, --outdir DIR        where to write the report (default: a
                           <kernel>-ncu-report/ folder next to the input)
   --kernel-regex REGEX    only analyze kernels matching REGEX
-  --config k=v            override a config key, e.g. --config M=4096
-                          --config tensor_peak=1800 (repeatable)
-  --gpu NAME              force a device spec, e.g. --gpu 'H100 SXM'
-  --M N                   matrix size for TFLOPS (default 8192)
+  --M N                   profile: square GEMM size for the --compare-cublas
+                          reference run (required with --compare-cublas)
   --open                  open the report in the browser (report/view)
   --port N                serve port (default 8000)
 
@@ -269,11 +276,11 @@ profile options
                           A100-80GB RTX-PRO-6000 H100 H200 B200 B200+ B300
                           (default H100)
   --timeout N             Modal run timeout in seconds (default 1200)
-  --launch-skip N         ncu launch skip (default: auto — profile every
-                          launch; the report stars the dominant kernel)
-  --launch-count N        ncu launches to capture; >1 averages steady-state
-                          (default 1)
-  --clock-control MODE    ncu clock control: boost | none | base (default
+  --launch-skip N         ncu launch skip (default 1: skip the warmup
+                          launch and profile ONE kernel)
+  --launch-count N        ncu launches to capture (default 1 — one kernel
+                          at a time); >1 averages steady-state
+  --clock-control MODE    ncu clock control: base | boost | none (default
                           boost; ncu's own base understates throughput ~30-45%)
   --compare-cublas        also profile a cuBLAS GEMM under identical flags,
                           same report series (fair, same-clock baseline)
@@ -286,7 +293,7 @@ profile options
 
 ```bash
 cd ncu-view
-python3 -m pytest tests/ -q          # 41 tests
+python3 -m pytest tests/ -q          # 32 tests
 python3 tests/test_against_ncu.py ../kernels/cute_dsl/B200/results/golden/matmul_v1.ncu-rep \
     ../kernels/cute_dsl/B200/results/golden/matmul_v1.raw.csv
 # the ingest-vs-ncu harness: both ingests must agree, or ncu-view has a bug
@@ -294,7 +301,7 @@ python3 tests/test_against_ncu.py ../kernels/cute_dsl/B200/results/golden/matmul
 
 The golden artifacts (`kernels/cute_dsl/B200/results/golden/`) are real ncu
 profiles of the `Beating cuBLAS on B200` cute-dsl matmul, with NVIDIA's
-section exports; they pin the rendering and the verdicts.
+section exports; they pin the rendering and NVIDIA's rule results.
 
 ## License
 
