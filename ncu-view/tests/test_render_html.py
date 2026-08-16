@@ -32,7 +32,8 @@ function el() { return { _html:'', textContent:'', style:{}, dataset:{},
 const els = {};
 const document = { addEventListener(t,f){ if(t==='DOMContentLoaded') this.ready=f; },
   querySelector(s){ if(!els[s]) els[s]=el(); return els[s]; },
-  querySelectorAll(){ return []; } };
+  querySelectorAll(){ return []; },
+  createElement(){ return el(); } };
 globalThis.document = document;
 globalThis.IntersectionObserver = class { observe(){} };
 """
@@ -46,8 +47,8 @@ def _js(html: str) -> str:
 
 def _run_node(program: str) -> str:
     r = subprocess.run(
-        [shutil.which("node") or "node", "-e", program],
-        capture_output=True, text=True, timeout=60,
+        [shutil.which("node") or "node", "-"],
+        input=program, capture_output=True, text=True, timeout=120,
     )
     if r.returncode != 0:
         raise AssertionError(f"node failed:\n{r.stdout}\n{r.stderr}")
@@ -68,6 +69,9 @@ checks['achieved occupancy chip'] = main.includes('Achieved occupancy');
 checks['all kernels in sidebar'] = KERNELS.every(n => sb.includes(n));
 checks['summary nav'] = sb.includes('Summary');
 checks['no derived toggle'] = !main.includes('show derived');
+checks['derived card ours on counters input'] = main.includes('Derived metrics') &&
+  main.includes('src-tag ours') && main.includes('DRAM bytes moved') &&
+  !main.includes('CTAs launched');
 curView = 'summary'; renderMain();
 const summ = els['#main'].innerHTML;
 checks['summary series table'] = summ.includes('Kernel series') &&
@@ -102,7 +106,90 @@ checks['no our verdicts'] = !main.includes('PIPE-BOUND') &&
   !main.includes('LATENCY-BOUND');
 checks['sections tree nvidia'] = sb.includes('Speed Of Light') &&
   sb.includes('Warp State Statistics');
-checks['zero not-collected'] = !main.includes('not collected');
+checks['zero nvidia not-collected one-liners'] =
+  !main.includes('==WARNING== No metrics to show');
+checks['derived card marked ours'] = main.includes('Derived metrics') &&
+  main.includes('src-tag ours') && main.includes('Calculated by ncu-view, not by NVIDIA');
+checks['derived values present'] = ['Kernel-wide IPC', 'Instructions per thread',
+  'CTAs launched', 'Occupancy utilization'].every(s => main.includes(s));
+checks['derived descs'] = main.includes('ddesc') && main.includes('dgroup');
+checks['derived click details'] = main.includes('ddetails') &&
+  main.includes("this.classList.toggle('open')");
+checks['derived tensor tile'] = main.includes('Tensor FLOPS (NVIDIA ops-path)');
+checks['roofline chart computed'] = main.includes('rl-pt') &&
+  main.includes('>Achieved<') && main.includes('Ridge Point');
+checks['roofline note ours'] = main.includes('calculated by ncu-view') &&
+  main.includes('SASS FMA FLOP counters') &&
+  main.includes('NVIDIA tensor ops-path');
+checks['pm sampling real config'] = !main.includes('Illustrative') &&
+  main.includes('Sampling configuration') && main.includes('Warp-sampling period');
+checks['hierarchy tables'] = main.includes('Memory hierarchy') &&
+  main.includes('FLOP accounting by precision') && main.includes('L1 (SM\u2194L2)');
+checks['memory chart rendered'] = main.includes('Memory Chart') &&
+  main.includes('memchart') && main.includes('mc-unit') &&
+  main.includes('Link % of') && main.includes('L1/TEX Cache') &&
+  main.includes('Device Memory');
+checks['memory chart links'] = main.includes('sectors') &&
+  main.includes('· %') || main.includes('req · ') || main.includes('· 16.3%');
+checks['memory tables all'] = ['Shared Memory', 'L1/TEX Cache', 'L2 Cache',
+  'L2 Eviction Policies', 'Device Memory'].every(s => main.includes(s));
+checks['memory table rows'] = main.includes('GPU Total') &&
+  main.includes('Bank Conflicts') && main.includes('Sector Misses to L2') &&
+  main.includes('TEX Op') && main.includes('Normal Demote');
+checks['search palette built'] = typeof buildSearchIndex === 'function' &&
+  typeof searchGo === 'function' && typeof bindSearch === 'function';
+checks['search index nonempty'] = typeof SEARCH !== 'undefined' && SEARCH.length > 0;
+checks['metric ref wrapper'] = main.includes('Metric reference') &&
+  main.includes('Profiling Guide §2.4 metric families');
+checks['metric ref cards'] = ['sec-mr-launch', 'sec-mr-occupancy', 'sec-mr-device',
+  'sec-mr-pcsamp', 'sec-mr-pcsamp-not-issued', 'sec-mr-warpidsamp',
+  'sec-mr-warpidsamp-not-issued', 'sec-mr-source', 'sec-mr-evict']
+  .every(id => main.includes('id="' + id + '"'));
+checks['metric ref launch rows'] = main.includes('launch__grid_size') &&
+  main.includes('Maximum total number of blocks in a grid') && main.includes('2,048') &&
+  main.includes('13.84');
+checks['metric ref values'] = main.includes('NVIDIA B200') && main.includes('143.9K') &&
+  main.includes('6.25%') && main.includes('PolicySpread');
+checks['metric ref honest absent'] = main.includes('Not collected in this profile') &&
+  main.includes('warpidsamp metric family is absent');
+checks['metric ref sidebar'] = sb.includes('METRIC REFERENCE') &&
+  sb.includes('Launch Metrics');
+checks['metric ref search rows'] = typeof SEARCH !== 'undefined' &&
+  SEARCH.some(x => x.kind === 'r' && x.label === 'launch__grid_size' && x.sid === 'mr-launch') &&
+  SEARCH.some(x => x.kind === 's' && x.sid === 'mr-evict');
+checks['long rule messages wrap'] = main.includes('class="num wrap">The memory access pattern for global stores') &&
+  main.includes('class="num wrap">Out of the 2147588800.0 bytes') &&
+  main.includes('class="num wrap">The ratio of peak float (FP32)');
+checks['mref names wrap'] = main.includes('class="mref-name">') &&
+  !main.includes('class="l mref-name"');
+checks['short kernel names'] = main.includes('class="kname" title="click to show full name"') &&
+  main.includes('class="ks">kernel_cutlass') && main.includes('…CopyAtom_ThrI_0</span>') &&
+  main.includes('class="kf">kernel_cutlass_kernel_TiledMMA_ThrLayoutVMNK11110000');
+curView = 'summary'; renderMain();
+const summ = els['#main'].innerHTML;
+checks['recs rule name first'] = summ.includes('<span class="rec-name">Warp Stall</span>') &&
+  !summ.includes('rec-k');
+checks['recs no kernel names'] = !summ.includes('kernel_cutlass') &&
+  !summ.includes('class="kname"');
+checks['series no kernel column single kernel'] = !summ.includes('<th>Kernel</th>') &&
+  summ.includes('Kernel series');
+checks['recs est desc'] = summ.indexOf('<span class="rec-name">Uncoalesced Global Accesses</span>') <
+  summ.indexOf('<span class="rec-name">Issue Slot Utilization</span>') &&
+  summ.indexOf('<span class="rec-name">Issue Slot Utilization</span>') <
+  summ.indexOf('<span class="rec-name">Theoretical Occupancy</span>') &&
+  summ.includes('est. 86.3x') && !summ.includes('est. 64.2xx') &&
+  summ.includes('>est. 9.1x<');
+checks['recs all 11 shown'] = summ.includes('<span class="rec-name">Bottleneck</span>') &&
+  summ.includes('<span class="rec-name">Roofline Analysis</span>') &&
+  summ.includes('<span class="rec-name">High Pipe Utilization</span>');
+checks['matmul prefix stripped'] = kdisp('matmul_v1.cu-1786855259') === 'v1.cu-1786855259' &&
+  kdisp('matmul_v1.py-1786885115') === 'v1.py-1786885115' &&
+  kdisp('matmul') === 'matmul' && kdisp('v1_kern') === 'v1_kern';
+checks['big numbers humanized'] = main.includes('>4.49 <') && main.includes('M cycle') &&
+  main.includes('>4.37 <') && main.includes('35.34M') &&
+  main.includes('1.13G') && main.includes('191.5G') &&
+  main.includes('1.05') && main.includes('M inst') && main.includes('1.100 TFLOP') &&
+  !main.includes('35,339,164') && !main.includes('4.49396e+06');
 let ok = true;
 for (const [k, v] of Object.entries(checks)) {
   console.log((v ? 'PASS' : 'FAIL') + '  ' + k); if (!v) ok = false; }

@@ -60,6 +60,8 @@ class KernelProfile:
     str_metrics: dict[str, str] = field(default_factory=dict)
     # The device the profile ran on, as reported by the profile itself.
     device_name: str | None = None
+    # Raw device__attribute_* facts the profile reports about the device.
+    device_attrs: dict[str, object] = field(default_factory=dict)
     # Phase 2: when the input is an .ncu-rep, NVIDIA's own section rows and
     # rule results ride along untouched, rendered with their source label.
     ncu_sections: list[Section] = field(default_factory=list)

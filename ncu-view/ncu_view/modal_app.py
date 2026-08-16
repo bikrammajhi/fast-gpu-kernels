@@ -201,7 +201,8 @@ def _profile_source_body(run_cmd: str, run_id: str,
     def _capture_into(rrep: str, cmd: str, skip: int, count: int,
                       cc: str) -> subprocess.CompletedProcess:
         proc = subprocess.Popen(
-            ["ncu", "--set", "full", "--clock-control", cc,
+            ["ncu", "--set", "full", "--warp-sampling-interval", "auto",
+             "--clock-control", cc,
              "--launch-skip", str(skip), "--launch-count",
              str(count), "-o", rrep, "sh", "-c", cmd],
             cwd=REMOTE_SRC, env=env, stdout=subprocess.PIPE,

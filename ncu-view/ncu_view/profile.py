@@ -17,21 +17,41 @@ from pathlib import Path
 
 # NVIDIA sections whose own tables we export next to the report so the
 # report page can show NVIDIA's detailed numbers instead of our derivation.
+# Every section ncu offers (`ncu --list-sections` on the image, ncu 13.x):
+# some report "No metrics to show" for a given rep — those are skipped.
 NCU_DETAIL_SECTIONS = [
     "SchedulerStats",
     "WarpStateStats",
     "SpeedOfLight",
+    "SpeedOfLight_RooflineChart",
+    "SpeedOfLight_HierarchicalDoubleRooflineChart",
+    "SpeedOfLight_HierarchicalHalfRooflineChart",
+    "SpeedOfLight_HierarchicalSingleRooflineChart",
+    "SpeedOfLight_HierarchicalTensorRooflineChart",
     "ComputeWorkloadAnalysis",
+    "InstructionStats",
+    "LaunchStats",
+    "MemoryWorkloadAnalysis",
     "MemoryWorkloadAnalysis_Tables",
     "MemoryWorkloadAnalysis_Chart",
+    "NumaAffinity",
     "Occupancy",
     "SourceCounters",
-    "SpeedOfLight_RooflineChart",
     "PmSampling",
+    "PmSampling_WarpStates",
+    "Nvlink",
+    "Nvlink_Tables",
+    "Nvlink_Topology",
+    "C2CLink",
+    "WorkloadDistribution",
 ]
 # ncu section ids that don't match our own sid naming; the CSV overlay
 # keys on OUR sid, so the exported file must be named with it.
-NCU_SID_ALIAS = {"PmSampling": "PM Sampling"}
+NCU_SID_ALIAS = {
+    "PmSampling": "PM Sampling",
+    "PmSampling_WarpStates": "PM Sampling: Warp States",
+    "NumaAffinity": "NUMA Affinity",
+}
 
 
 def _sec_filename(run_id: str, ncu_sid: str) -> str:
@@ -173,7 +193,9 @@ def run_profile(source: str, outdir: Path | None, build_cmd: str | None,
         skip, count = (1, 1) if launch_skip is None \
             else (launch_skip, launch_count)
         try:
-            subprocess.run(["ncu", "--set", "full", "--clock-control",
+            subprocess.run(["ncu", "--set", "full",
+                            "--warp-sampling-interval", "auto",
+                            "--clock-control",
                             clock_control, "--launch-skip",
                             str(skip), "--launch-count",
                             str(count), "-o", str(rep), "sh", "-c",
@@ -195,7 +217,9 @@ def run_profile(source: str, outdir: Path | None, build_cmd: str | None,
                             "-o", str(bench_bin), str(bench_src)],
                            cwd=cwd, check=True)
             crep = outdir / f"{run_id}-cublas.ncu-rep"
-            subprocess.run(["ncu", "--set", "full", "--clock-control",
+            subprocess.run(["ncu", "--set", "full",
+                            "--warp-sampling-interval", "auto",
+                            "--clock-control",
                             clock_control, "--launch-skip",
                             str(skip), "--launch-count",
                             str(count), "-o", str(crep), "sh", "-c",

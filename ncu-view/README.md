@@ -8,6 +8,9 @@ Point it at an ncu profile and read the result like Nsight Compute's GUI: a
 **Details** page with the sections NVIDIA itself exports — Speed Of Light,
 Occupancy, Scheduler, Warp State, Compute/Memory Workload, Instruction,
 PM Sampling and NvLink — and NVIDIA's rule-engine findings on top.
+All big numbers are shown with smart units (1.100 TFLOP, 453.62 TFLOP/s,
+7.67 TB/s) and the UI wears a terminal theme (monospace, phosphor green,
+☼ toggles light).
 
 Or point it at *source code* and it runs the kernel on your Modal account,
 profiles it with ncu, and renders the report — one command, no local ncu
@@ -18,12 +21,35 @@ installation needed.
 - **Any input, one report.** `.ncu-rep` (NVIDIA's own format, read via their
   `ncu_report` module), `ncu --page raw --csv` dumps, or our JSON — all
   produce the same HTML + JSON report.
-- **Official NVIDIA data only.** When the profile is a `.ncu-rep`, the report
-  embeds NVIDIA's *own* detailed section tables (exported via
-  `ncu --import <rep> --section <X> --csv`), labeled with a `NVIDIA` source
-  tag, and NVIDIA's rule-engine recommendations verbatim — including their
-  severity, message and focus metrics. Nothing of our own is computed or
-  layered on top: the per-kernel banner *is* NVIDIA's Speed Of Light
+- **Official NVIDIA data, plus derived metrics marked ours.** When the
+  profile is a `.ncu-rep`, the report embeds NVIDIA's *own* detailed section
+  tables (exported via `ncu --import <rep> --section <X> --csv`), labeled
+  with a `NVIDIA` source tag, and NVIDIA's rule-engine recommendations
+  verbatim — including their severity, message and focus metrics. On top of
+  that, a **Derived metrics** card (tagged `ours`) computes things the
+  profiler doesn't give directly — FLOPs (FMA-pipe and tensor-ops-path),
+  achieved FLOP/s, arithmetic intensity, CTAs launched, instructions per
+  thread, kernel-wide IPC, duration per CTA, occupancy utilization,
+  warp-slot stall share, implied SM clock, DRAM/FMA/tensor bandwidths,
+  PM-sampler configuration and more — each with a one-line definition and
+  computed from NVIDIA's own exported rows and raw counters with its
+  formula and source rows shown; nothing is assumed, and a metric whose
+  inputs are missing is skipped. Tiles are grouped by what they measure
+  (Compute → Memory → Roofline → Occupancy & Scheduling → Timing → PM
+  Sampling) and clicking a tile expands its formula/sources. The Tensor
+  FLOPS tile is always present — even on FMA-only kernels, where it
+  honestly reads 0.
+- **The roofline is computed, not sketched.** The Speed Of Light card draws
+  the log-log roofline with the real achieved point (FMA FLOPs from NVIDIA's
+  SASS counters **plus tensor-core FLOPs from NVIDIA's own
+  `sm__ops_path_tensor_*` FLOP-path counters** ÷ DRAM bytes), the
+  memory-roof slope (NVIDIA achieved bandwidth ÷ NVIDIA %-of-peak), the
+  compute roof (the tensor ops-path peak when the kernel uses tensor cores,
+  else the FMA-pipe peak) and the ridge point — plus a memory-hierarchy
+  table (L1/L2/DRAM achieved vs derived peak, AI per level) and a
+  per-precision FLOP accounting (FMA rows + tensor rows with real FLOPs).
+  No MMA shape is ever assumed. The per-kernel banner *is* NVIDIA's Speed
+  Of Light
   bottleneck rule. Inputs without exported sections (raw CSVs, counters
   JSON) get the summary chips and an honest note that NVIDIA sections are
   missing — never a fabricated section.
@@ -293,7 +319,7 @@ profile options
 
 ```bash
 cd ncu-view
-python3 -m pytest tests/ -q          # 32 tests
+python3 -m pytest tests/ -q          # 36 tests
 python3 tests/test_against_ncu.py ../kernels/cute_dsl/B200/results/golden/matmul_v1.ncu-rep \
     ../kernels/cute_dsl/B200/results/golden/matmul_v1.raw.csv
 # the ingest-vs-ncu harness: both ingests must agree, or ncu-view has a bug

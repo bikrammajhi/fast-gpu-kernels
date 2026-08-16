@@ -78,9 +78,13 @@ def _ingest_pair(report_path: str, csv_path: str):
                 )
         # The warp-stall counters are the heart of the analysis: both ingests
         # must carry all of them and agree, or the report is not comparing
-        # like with like.
+        # like with like. A reason missing from BOTH exports is a device
+        # taxonomy difference (B200 drops imc_miss/warpgroup_arrive), not an
+        # ingest bug — only one-sided absence is a divergence.
         for base in STALL_BASES:
             a, b = rp.metrics.get(base), kp.metrics.get(base)
+            if a is None and b is None:
+                continue
             if a is None or b is None:
                 mismatched.append(f"{kp.name}: stall counter {base} missing "
                                   f"(report={a is not None}, csv={b is not None})")

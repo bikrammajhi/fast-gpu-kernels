@@ -21,20 +21,30 @@ from pathlib import Path
 from .model import KernelProfile, Row, RuleResult, Section
 
 NOISE_TENSOR_PCT = 5.0
+NOISE_MAX_DURATION_NS = 20e6  # plumbing is short-lived; a real scalar kernel is not
 NOISE_NAMES = ("__nvcc_device_query", "at::", "distribution_",
-               "elementwise", "reduce_", "memcpy_", "memset_")
+               "elementwise", "reduce_", "memcpy_", "memset_",
+               "memcpy", "cudaMemcpy")
 noise_dropped = 0
 
 
 def _is_noise(kp: KernelProfile) -> bool:
     """Runtime plumbing (torch init/compare, device query, memcpy) never
-    drives the tensor pipe, so the GEMM report drops it. The name fallback
-    only fires when the metric is absent (old ncu / curated inputs)."""
+    drives the tensor pipe, so the GEMM report drops it. A low tensor-pipe
+    % alone is NOT plumbing — scalar kernels legitimately never touch the
+    tensor pipe — so the metric rule also requires a plumbing-shaped
+    duration. The name fallback only fires when the metric is absent
+    (old ncu / curated inputs)."""
+    if any(n in kp.name for n in NOISE_NAMES):
+        return True
     t = kp.metrics.get(
         "sm__pipe_tensor_cycles_active.avg.pct_of_peak_sustained_active")
-    if t is not None:
-        return t < NOISE_TENSOR_PCT
-    return any(n in kp.name for n in NOISE_NAMES)
+    if t is None:
+        return False
+    if t >= NOISE_TENSOR_PCT:
+        return False
+    d = kp.metrics.get("gpu__time_duration.avg")
+    return d is not None and d < NOISE_MAX_DURATION_NS
 
 
 STALL_BASES = [
@@ -55,26 +65,30 @@ STALL_BASES = [
     "smsp__average_warps_issue_stalled_drain_per_issue_active",
     "smsp__average_warps_issue_stalled_no_instruction_per_issue_active",
     "smsp__average_warps_issue_stalled_misc_per_issue_active",
+    "smsp__average_warps_issue_stalled_imc_miss_per_issue_active",
+    "smsp__average_warps_issue_stalled_warpgroup_arrive_per_issue_active",
 ]
 
 STALL_SHORT = {
     "smsp__average_warps_issue_stalled_long_scoreboard_per_issue_active": "long scoreboard",
     "smsp__average_warps_issue_stalled_short_scoreboard_per_issue_active": "short scoreboard",
     "smsp__average_warps_issue_stalled_barrier_per_issue_active": "barrier",
-    "smsp__average_warps_issue_stalled_wait_per_issue_active": "fixed-latency wait",
+    "smsp__average_warps_issue_stalled_wait_per_issue_active": "wait",
     "smsp__average_warps_issue_stalled_membar_per_issue_active": "membar",
     "smsp__average_warps_issue_stalled_mio_throttle_per_issue_active": "MIO throttle",
     "smsp__average_warps_issue_stalled_math_pipe_throttle_per_issue_active": "math pipe throttle",
-    "smsp__average_warps_issue_stalled_dispatch_stall_per_issue_active": "dispatch",
+    "smsp__average_warps_issue_stalled_dispatch_stall_per_issue_active": "dispatch stall",
     "smsp__average_warps_issue_stalled_not_selected_per_issue_active": "not selected",
     "smsp__average_warps_issue_stalled_selected_per_issue_active": "selected",
     "smsp__average_warps_issue_stalled_tex_throttle_per_issue_active": "tex throttle",
     "smsp__average_warps_issue_stalled_sleeping_per_issue_active": "sleeping",
     "smsp__average_warps_issue_stalled_lg_throttle_per_issue_active": "LSU throttle",
-    "smsp__average_warps_issue_stalled_branch_resolving_per_issue_active": "branch",
+    "smsp__average_warps_issue_stalled_branch_resolving_per_issue_active": "branch resolving",
     "smsp__average_warps_issue_stalled_drain_per_issue_active": "drain",
-    "smsp__average_warps_issue_stalled_no_instruction_per_issue_active": "no instruction",
+    "smsp__average_warps_issue_stalled_no_instruction_per_issue_active": "no instructions",
     "smsp__average_warps_issue_stalled_misc_per_issue_active": "misc",
+    "smsp__average_warps_issue_stalled_imc_miss_per_issue_active": "imc miss",
+    "smsp__average_warps_issue_stalled_warpgroup_arrive_per_issue_active": "warpgroup arrive",
 }
 
 FALLBACK_MISSING = "n/a (not collected)"
@@ -352,15 +366,34 @@ def _ncu_rules_new(action, kp: KernelProfile, out_rules: list, out_sections: dic
 NCU_SECTION_TITLES = {
     # NVIDIA's raw section ids -> readable titles (ncu's own GUI names)
     "SpeedOfLight": "Speed Of Light",
-    "SpeedOfLight_RooflineChart": "Speed Of Light Roofline",
+    "SpeedOfLight_RooflineChart": "Speed Of Light \u2014 Roofline",
+    "SpeedOfLight_HierarchicalDoubleRooflineChart":
+        "Speed Of Light \u2014 Hierarchical Roofline (Double)",
+    "SpeedOfLight_HierarchicalHalfRooflineChart":
+        "Speed Of Light \u2014 Hierarchical Roofline (Half)",
+    "SpeedOfLight_HierarchicalSingleRooflineChart":
+        "Speed Of Light \u2014 Hierarchical Roofline (Single)",
+    "SpeedOfLight_HierarchicalTensorRooflineChart":
+        "Speed Of Light \u2014 Hierarchical Roofline (Tensor)",
     "SchedulerStats": "Scheduler Statistics",
     "WarpStateStats": "Warp State Statistics",
     "ComputeWorkloadAnalysis": "Compute Workload Analysis",
+    "InstructionStats": "Instruction Statistics",
+    "LaunchStats": "Launch Statistics",
+    "MemoryWorkloadAnalysis": "Memory Workload Analysis",
     "MemoryWorkloadAnalysis_Tables": "Memory Workload Analysis",
-    "MemoryWorkloadAnalysis_Chart": "Memory Workload Analysis (chart)",
+    "MemoryWorkloadAnalysis_Chart": "Memory Workload Analysis \u2014 Chart",
+    "NUMA Affinity": "NUMA Affinity",
     "Occupancy": "Occupancy",
     "SourceCounters": "Source Counters",
     "PM Sampling": "PM Sampling",
+    "PM Sampling: Warp States": "PM Sampling: Warp States",
+    "Nvlink": "NVLink",
+    "Nvlink_Tables": "NVLink Tables",
+    "Nvlink_Topology": "NVLink Topology",
+    "C2CLink": "C2C Link",
+    "WorkloadDistribution": "Workload Distribution",
+    "Tile": "Tile Statistics",
 }
 
 
@@ -371,7 +404,7 @@ def _ncu_section(sid: str, title: str | None = None, description: str = "",
     pretty = NCU_SECTION_TITLES.get(sid, title or sid)
     return Section(
         sid=sid,
-        title=f"{pretty} (NVIDIA)",
+        title=pretty,
         description=description or "as reported by NVIDIA's ncu_report module",
         rows=rows or [],
         table=table,
@@ -697,13 +730,17 @@ def ingest_report(path: str | Path, kernel: str | None = None) -> list[KernelPro
 
 
 def _attach_device(kp: KernelProfile) -> None:
-    """Record the device name the profile reports for itself."""
-    attrs: dict[str, object] = {
-        k: v for k, v in kp.metrics.items()
-        if k.startswith("device__attribute_")
-    }
-    attrs.update(kp.str_metrics)
-    name = attrs.get("device__attribute_display_name")
+    """Record what the profile reports about its own device.
+
+    All device__attribute_* metrics are NVIDIA's own - nothing hardcoded.
+    The full set is kept raw in `device_attrs`; the formatted summary is
+    built in report.py.
+    """
+    kp.device_attrs = {k: v for k, v in kp.metrics.items()
+                       if k.startswith("device__attribute_")}
+    kp.device_attrs.update({k: v for k, v in kp.str_metrics.items()
+                            if k.startswith("device__attribute_")})
+    name = kp.device_attrs.get("device__attribute_display_name")
     kp.device_name = str(name) if name is not None else None
 
 
@@ -735,6 +772,18 @@ def stall_total(kp: KernelProfile) -> float | None:
     vals = [kp.metrics.get(b) for b in STALL_BASES]
     vals = [x for x in vals if x is not None]
     return sum(vals) if vals else None
+
+
+def stall_reasons(kp: KernelProfile) -> list[dict]:
+    """Per-reason warp-stall cycles per issued instruction, NVIDIA's own
+    stall counters, sorted largest first (feeds the Warp State chart)."""
+    out = []
+    for base in STALL_BASES:
+        v = kp.metrics.get(base)
+        if v and v > 0:
+            out.append({"name": STALL_SHORT[base], "cycles": round(v, 2)})
+    out.sort(key=lambda r: r["cycles"], reverse=True)
+    return out
 
 
 def ingest(path: str | Path, kernel: str | None = None) -> list[KernelProfile]:
