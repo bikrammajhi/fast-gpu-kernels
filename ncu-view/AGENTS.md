@@ -123,8 +123,12 @@ Operating notes for AI agents working in this repo. Read before making changes.
   the report renders NVIDIA's own exported section tables and NVIDIA's own
   rule-engine results verbatim. Nothing is invented: our derived sections
   (`sections.py`) and our rules/decision-table verdict (`rules.py`) were
-  DELETED; the per-kernel banner verdict IS NVIDIA's SOLBottleneck rule
-  (`_ncu_verdict` in `report.py`, fallback: highest-severity NVIDIA rule).
+  DELETED; the per-kernel banner verdict IS NVIDIA's TOP recommendation —
+  the rule with the highest NVIDIA est. speedup (`_ncu_verdict` in
+  `report.py` sorts by `_est_val` desc, severity asc — the same comparator
+  as the report's recommendation list and the terminal printout; the old
+  SOLBottleneck-pick was replaced by user decision: the top rec is the
+  signal most likely to give the maximum improvement).
   `kernels[].sections` = `ncu_sections`, `kernels[].rules` = `ncu_rules`
   (there are no `ncu_sections`/`ncu_rules` keys anymore). NEW (user asked for
   "things the profiler doesn't provide directly"): `kernels[].derived` from
@@ -410,9 +414,26 @@ assert the active `.tab-panel` becomes `panel-metrics`.
   main Memory section's `memBody`); `buildSearchIndex`/`searchPopHtml`/
   `searchMark`/`searchMove`/`searchGo`/`flash`/`bindSearch` (⌘K palette,
   binds `#global` input + `#search-pop` keynav + row clicks).
-- `ncu-view/ncu_view/report.py` — `_ncu_verdict` (SOLBottleneck rule,
-  fallback highest severity), `_sm_freq` (SOL "SM Frequency", else ncu's
-  formula), dict serialization (`roofline` embedded per kernel).
+- `ncu-view/ncu_view/report.py` — `_ncu_verdict` (top recommendation:
+  highest `_est_val`, severity tiebreak), `_est_val` (parses '86.3x' /
+  '5700.0%' like the JS estVal — a dict OR RuleResult), `_sm_freq` (SOL
+  "SM Frequency", else ncu's formula), dict serialization (`roofline`
+  embedded per kernel).
+- `ncu-view/ncu_view/terminal.py` — agent-facing terminal printouts, printed
+  after every `profile` and `report` run, built with **rich** (dependency
+  `rich>=13.0` in pyproject; test files must inject `Console(file=…)` —
+  patching sys.stdout does NOT intercept the module-level console):
+  `print_device` renders an nvidia-smi-style panel (`SQUARE_DOUBLE_HEAD`
+  green box, right-aligned bold labels) from the report's device
+  attributes (name/bus-Id/ECC/CC/SM/memory/L2/clocks — nothing hardcoded),
+  `print_signals` prints per-kernel TOP OPTIMIZATION SIGNALS panels (bold
+  kernel name + stats line + top-5 NVIDIA rules in a borderless table
+  sorted by est. speedup, severity-tagged, messages + focus metrics) + a
+  yellow OVERALL panel for multi-kernel reports (the dominant kernel → its
+  verdict rule), then a `machine-readable signals
+  (agent-parsable JSON)` tail with `est_value` floats — the parse target
+  for autonomous kernel-research loops. Name rendering uses `_kshort`
+  (first14…last3underscoreSegments — same as the HTML kshort).
   `sections.py`/`rules.py` were DELETED.
 - `ncu-view/tests/test_ncu_sections.py` — parser/overlay tests (fixture is the
   REAL ncu long-format CSV); `tests/test_render_html.py` — jsdom golden checks

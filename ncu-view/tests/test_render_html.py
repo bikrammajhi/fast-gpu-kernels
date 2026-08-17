@@ -96,8 +96,11 @@ checks['tensor pipe row'] = main.includes('Tensor pipe') ||
 checks['warp stalls'] = main.includes('Stall Cycles Per Issued Instruction') ||
   main.includes('Warp State');
 checks['nvidia rules block'] = main.includes('Recommendations (NVIDIA rule engine)');
-checks['bottleneck banner'] = main.includes('Bottleneck') &&
-  main.includes('verdict sev-');
+checks['top rec banner'] = (() => {
+  const vname = (main.match(/class="verdict sev-[a-z]+">([^<]+)</) || [])[1];
+  const r1 = (main.match(/<div class="recno">1<\\/div>\\s*<div class="rectext">([^<]+)</) || [])[1];
+  return !!vname && vname === r1 &&
+    main.includes('Top recommendation · NVIDIA rule engine'); })();
 checks['pm nvidia detailed'] = ['Maximum Buffer Size', 'Maximum Sampling Interval']
   .every(s => main.includes(s));
 checks['no derived toggle'] = !main.includes('show derived') &&

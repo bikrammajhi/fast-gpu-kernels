@@ -254,6 +254,7 @@ def run_profile(source: str, outdir: Path | None, build_cmd: str | None,
 
     from .html import render_html
     from .report import build
+    from .terminal import print_device, print_signals
 
     report = build(report_input)
     html = outdir / f"{run_id}.html"
@@ -261,4 +262,7 @@ def run_profile(source: str, outdir: Path | None, build_cmd: str | None,
     (outdir / f"{run_id}.json").write_text(json.dumps(report, indent=1))
     print(f"wrote {html}")
     print(f"wrote {csv}")
+    print()
+    print_device(report["meta"].get("device") or {})
+    print_signals(report)
     return 0

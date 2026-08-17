@@ -9,6 +9,8 @@ invented on top.
 
 from __future__ import annotations
 
+import re
+
 from . import ingest as _ingest
 from .derived import derive, memory_model, roofline
 from .ingest import ingest
@@ -18,6 +20,21 @@ from .model import KernelProfile, RuleResult, Section
 STALL_TOP = "smsp__average_warps_issue_stalled_long_scoreboard_per_issue_active"
 
 SEV_RANK = {"critical": 0, "warning": 1, "suggestion": 2, "info": 3, "hint": 4}
+
+
+def _est_val(r: RuleResult | dict) -> float:
+    """NVIDIA's estimated speedup as a plain number ('86.3x' -> 86.3,
+    '5700.0%' -> 57.0); -1 when absent — mirrors the report JS estVal."""
+    est = r.est if isinstance(r, RuleResult) else r.get("est")
+    e = (est or "").strip()
+    if not e:
+        return -1.0
+    pct = e.endswith("%")
+    m = re.match(r"[+-]?(\d+(\.\d+)?|\.\d+)([eE][+-]?\d+)?", e)
+    if not m:
+        return -1.0
+    n = float(m.group(0))
+    return n / 100.0 if pct else n
 
 
 def _rule_dict(r: RuleResult) -> dict:
@@ -51,13 +68,12 @@ def _section_dict(s: Section) -> dict:
 
 
 def _ncu_verdict(kp: KernelProfile) -> RuleResult | None:
-    """The banner rule: NVIDIA's Speed Of Light bottleneck rule when the
-    rule engine reported one, else its most severe rule."""
-    for r in kp.ncu_rules:
-        if r.rid == "SOLBottleneck":
-            return r
+    """The banner rule: NVIDIA's TOP recommendation — the rule with the
+    highest estimated speedup (NVIDIA's own number), tie-broken by
+    severity, exactly the sort the report's recommendation list uses.
+    That is the signal most likely to give the maximum improvement."""
     ranked = sorted(kp.ncu_rules,
-                    key=lambda r: SEV_RANK.get(r.severity, 9))
+                    key=lambda r: (-_est_val(r), SEV_RANK.get(r.severity, 9)))
     return ranked[0] if ranked else None
 
 

@@ -256,6 +256,11 @@ def main(argv: list[str] | None = None) -> int:
     json_path.write_text(json.dumps(report, indent=1))
     print(f"wrote {html_path}")
     print(f"wrote {json_path}")
+    from .terminal import print_device, print_signals
+
+    print()
+    print_device(report["meta"].get("device") or {})
+    print_signals(report)
     if args.open or args.command == "view":
         webbrowser.open(html_path.resolve().as_uri())
     return 0

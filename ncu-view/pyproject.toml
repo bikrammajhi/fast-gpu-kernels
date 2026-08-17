@@ -15,7 +15,7 @@ classifiers = [
     "Topic :: Software Development :: Debuggers",
     "Topic :: System :: Hardware",
 ]
-dependencies = []
+dependencies = ["rich>=13.0"]
 
 [project.optional-dependencies]
 ncu = ["ncu-report>=2026.1"]   # read .ncu-rep files (NVIDIA's own reader)

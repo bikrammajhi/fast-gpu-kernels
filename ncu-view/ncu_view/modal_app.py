@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -498,7 +499,9 @@ def extract_sections(rep_key: str, run_id: str,
     return names
 
 
-def _print_smi_box(lines: list[str]) -> None:
+def _print_smi_box(lines: list[str], clear: bool = False) -> None:
+    if clear:
+        print("\r" + " " * 80 + "\r", end="", flush=True)
     width = max(len(ln) for ln in lines)
     print("┌" + "─" * (width + 2) + "┐")
     for ln in lines:
@@ -508,13 +511,18 @@ def _print_smi_box(lines: list[str]) -> None:
 
 def _watch_progress(run_id: str, total_steps: int,
                     volume: modal.Volume) -> threading.Event:
-    """Poll the container's progress file and render a live status bar."""
+    """Poll the container's progress file and render a live status bar.
+
+    TTY: one in-place `\\r` status line. Piped (agent runs): no spinner
+    flood — one plain line per step change, plus the smi box once."""
     stop = threading.Event()
+    tty = sys.stdout.isatty()
     width = 20
     smi_shown = False
+    last = None
 
     def _render() -> None:
-        nonlocal smi_shown
+        nonlocal smi_shown, last
         start = time.monotonic()
         while not stop.is_set():
             lines: list[str] = []
@@ -528,17 +536,11 @@ def _watch_progress(run_id: str, total_steps: int,
             if not smi_shown:
                 smi_lines = [ln[4:] for ln in lines if ln.startswith("smi:")]
                 if smi_lines:
-                    _print_smi_box(smi_lines)
+                    _print_smi_box(smi_lines, clear=tty)
                     smi_shown = True
-            if not lines:
-                print(f"\r[0/{total_steps}] waiting for Modal container "
-                      f"(image pull + GPU)… {mm}:{ss:02d}" + " " * 8,
-                      end="", flush=True)
-                time.sleep(1)
-                continue
             steps = [ln for ln in lines if ln.startswith("step:")]
-            cur = steps[-1][5:] if steps else "waiting for container"
-            done = max(len(steps) - 1, 0)
+            cur = steps[-1][5:] if steps else "waiting for Modal container"
+            done = min(len(steps), total_steps)
             msgs = [ln for ln in lines if ln.startswith("msg:")]
             status = msgs[-1][4:] if msgs else ""
             m = re.search(r"(\d+)%", status)
@@ -548,13 +550,19 @@ def _watch_progress(run_id: str, total_steps: int,
                 pct = done * 100 // (total_steps - 1)
             else:
                 pct = 0
-            filled = pct * width // 100
-            bar = "█" * filled + "░" * (width - filled)
-            print(f"\r[{done}/{total_steps}] {cur} — {mm}:{ss:02d} — "
-                  f"[{bar}] {pct:3d}% {status[:70]}" + " " * 4,
-                  end="", flush=True)
+            if tty:
+                filled = pct * width // 100
+                bar = "█" * filled + "░" * (width - filled)
+                print(f"\r[{done}/{total_steps}] {cur} — {mm}:{ss:02d} — "
+                      f"[{bar}] {pct:3d}% {status[:70]}" + " " * 4,
+                      end="", flush=True)
+            elif (done, cur) != last:
+                print(f"[{done}/{total_steps}] {cur} — {pct}% "
+                      f"{status[:70]}", flush=True)
+                last = (done, cur)
             time.sleep(1)
-        print()
+        if tty:
+            print()
 
     t = threading.Thread(target=_render, daemon=True)
     t.start()

@@ -389,7 +389,7 @@ function heroGrid(k){
   const verdict=v?`<div class="verdict sev-${esc(v.severity)}">${esc(v.name)}</div>
       <div class="copy">${esc(v.message)}</div>
       ${focusEvidence(v)}
-      <div class="small" style="font-size:8.5px;color:var(--dim);margin-top:8px;text-transform:uppercase;letter-spacing:.7px">${SEVNAME[v.severity]||v.severity} · NVIDIA rule result</div>`
+      <div class="small" style="font-size:8.5px;color:var(--dim);margin-top:8px;text-transform:uppercase;letter-spacing:.7px">Top recommendation · NVIDIA rule engine${v.est?` · est. ${esc(v.est)}`:''}</div>`
     :'<div class="verdict">No verdict</div><div class="copy">No NVIDIA rule result for this input.</div>';
   const rules=(k.rules||[]).slice().sort(estSort);
   const recs=rules.length?`<div class="rec-title">Recommendations (NVIDIA rule engine)</div>`+rules.map((r,i)=>`
