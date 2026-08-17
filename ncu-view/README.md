@@ -21,6 +21,11 @@ installation needed.
 Every `ncu-view report` / `ncu-view profile` run ends by printing the
 actionable result right in the terminal — no need to open the HTML:
 
+```bash
+ncu-view profile kernels/cute_dsl/B200/matmul_v1.py -o out/ --modal-gpu B200
+# profiles the kernel on a Modal B200, downloads the report, then prints:
+```
+
 1. an **nvidia-smi-style device panel** for the GPU that was actually
    profiled (name, bus-id, ECC, CC, SMs, memory, L2, clocks — all from the
    capture),
