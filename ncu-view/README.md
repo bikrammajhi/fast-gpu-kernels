@@ -16,6 +16,51 @@ Or point it at *source code* and it runs the kernel on your Modal account,
 profiles it with ncu, and renders the report — one command, no local ncu
 installation needed.
 
+## Terminal view — the verdict without the browser
+
+Every `ncu-view report` / `ncu-view profile` run ends by printing the
+actionable result right in the terminal — no need to open the HTML:
+
+1. an **nvidia-smi-style device panel** for the GPU that was actually
+   profiled (name, bus-id, ECC, CC, SMs, memory, L2, clocks — all from the
+   capture),
+2. per-kernel **TOP OPTIMIZATION SIGNALS** — NVIDIA's own top-5 rule-engine
+   findings sorted by NVIDIA's estimated speedup, severity-tagged, with
+   messages and focus metrics (plus an OVERALL panel for multi-kernel
+   reports),
+3. a machine-readable **JSON tail** (with `est_value` floats) an
+   autonomous kernel-research loop can parse directly.
+
+```text
+NVIDIA-SMI
+┌─────────────────────────────┬────────────────────────────────────────────────────┐
+│                   GPU  Name │ 0  NVIDIA B200                                     │
+│         Bus · ECC · CC · SM │ Bus-Id 5b:00.0  ·  ECC on  ·  CC 10.0  ·  SM 148   │
+│                 Memory · L2 │ 178.35 GiB · 126.5 MiB                             │
+│                      Clocks │ SM 1965 MHz · Mem 3996 MHz · Bus 7680 bit          │
+└─────────────────────────────┴────────────────────────────────────────────────────┘
+                                                                   captured via ncu · ncu-view 0.2.0
+
+╭──────────────────────────────────── TOP OPTIMIZATION SIGNALS ────────────────────────────────────╮
+│ kernel_cutlass…CopyAtom_ThrI_0 · 2.42 ms · pipe 20.7% · dram 11.8% · occupancy 6.3%              │
+│                                                                                                  │
+│ 1  WARN  Uncoalesced Global Accesses                                                  est. 86.3x │
+│          This kernel has uncoalesced global accesses resulting in a total of                     │
+│          62914560 excessive sectors (94% of the total 67108864 sectors). …                       │
+│ 2  WARN  Memory Cache Access Pattern                                                  est. 33.6x │
+│ 3  WARN  Issue Slot Utilization                                                       est. 64.2x │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+machine-readable signals (agent-parsable JSON):
+{ "device": { "name": "NVIDIA B200", … },
+  "kernels": [ { "name": "kernel_cutlass…", "duration_us": 2423.84,
+                 "signals": [ { "rid": "UncoalescedGlobalAccess",
+                                "est": "86.3x", "est_value": 86.3, … } ] } ] }
+```
+
+The same data is in the HTML report — the banner verdict, the
+recommendation list and the terminal signals all lead with the same rule.
+
 ## Features
 
 - **Any input, one report.** `.ncu-rep` (NVIDIA's own format, read via their
