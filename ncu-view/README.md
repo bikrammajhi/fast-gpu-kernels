@@ -48,9 +48,9 @@ installation needed.
   else the FMA-pipe peak) and the ridge point — plus a memory-hierarchy
   table (L1/L2/DRAM achieved vs derived peak, AI per level) and a
   per-precision FLOP accounting (FMA rows + tensor rows with real FLOPs).
-  No MMA shape is ever assumed. The per-kernel banner *is* NVIDIA's Speed
-  Of Light
-  bottleneck rule. Inputs without exported sections (raw CSVs, counters
+  No MMA shape is ever assumed. The per-kernel banner *is* NVIDIA's top
+  recommendation (see Verdict). Inputs without exported sections (raw
+  CSVs, counters
   JSON) get the summary chips and an honest note that NVIDIA sections are
   missing — never a fabricated section.
 - **NVIDIA-accurate everywhere.** Every "% of peak" (DRAM Throughput,
@@ -71,6 +71,14 @@ installation needed.
   verbatim; counters never collected show `n/a (not collected)` — never a
   zero. The stall figure is NVIDIA's own metric — the sum of its per-reason
   stall counters; the SM clock is NVIDIA's "SM Frequency" when exported.
+- **Terminal signals after every run.** Both `report` and `profile` finish
+  with an nvidia-smi-style device panel (name, bus-id, ECC, CC, SMs,
+  memory, L2, clocks — all from the capture, nothing hardcoded) and
+  per-kernel **TOP OPTIMIZATION SIGNALS**: NVIDIA's own top-5 rules sorted
+  by NVIDIA's estimated speedup, severity-tagged, with messages and focus
+  metrics, plus an OVERALL panel for multi-kernel reports. A
+  machine-readable JSON tail (with `est_value` floats) follows, ready for
+  autonomous kernel-research loops to parse.
 - **Self-contained output.** The HTML embeds the report JSON — open it from
   disk, email it, or serve it with `ncu-view serve`.
 
@@ -161,8 +169,10 @@ launches stays cheap. `--launch-skip N` lands on a specific launch, and
 `--launch-count >1` averages `gpu__time_duration` over several
 steady-state launches. The run shows live progress: every step
 (container start, upload, ncu capture, raw CSV, NVIDIA sections) prints
-with elapsed time and a completion bar, so nothing runs dark — and if a
-step fails, the error is printed instead of dying silently.
+with elapsed time and a completion bar, so nothing runs dark — an
+in-place status line in a terminal, one plain line per step when piped
+(agent runs). If a step fails, the error is printed instead of dying
+silently.
 
 **Clock fairness.** `ncu-view profile` defaults to `--clock-control base` —
 ncu's own default, so a plain run reproduces vanilla ncu exactly. Note that
@@ -273,11 +283,12 @@ Everything in the report is NVIDIA's own data, straight from the profile:
 
 ## Verdict
 
-The per-kernel banner is NVIDIA's Speed Of Light bottleneck rule
-("Bottleneck: Latency Issue" etc.), verbatim — the same verdict Nsight
-Compute's GUI shows. When the rule engine reported no SOL bottleneck, the
-banner shows NVIDIA's most severe rule for the kernel. There is no verdict
-of our own.
+The per-kernel banner is NVIDIA's **top recommendation** — the rule with
+the highest NVIDIA estimated speedup (severity breaks ties), verbatim from
+the rule engine. That is the signal most likely to give the maximum
+improvement, and it is the same rule that leads the recommendation list,
+the terminal TOP OPTIMIZATION SIGNALS panel and the `summary` command.
+There is no verdict of our own.
 
 ## CLI reference
 
@@ -307,7 +318,8 @@ profile options
   --launch-count N        ncu launches to capture (default 1 — one kernel
                           at a time); >1 averages steady-state
   --clock-control MODE    ncu clock control: base | boost | none (default
-                          boost; ncu's own base understates throughput ~30-45%)
+                          base — ncu's own default; boost locks the max
+                          boost clock, the reproducible peak)
   --compare-cublas        also profile a cuBLAS GEMM under identical flags,
                           same report series (fair, same-clock baseline)
   --bench-precision P     baseline io dtype: fp16 | bf16 (default fp16; bf16
@@ -319,7 +331,7 @@ profile options
 
 ```bash
 cd ncu-view
-python3 -m pytest tests/ -q          # 36 tests
+python3 -m pytest tests/ -q          # 50 tests
 python3 tests/test_against_ncu.py ../kernels/cute_dsl/B200/results/golden/matmul_v1.ncu-rep \
     ../kernels/cute_dsl/B200/results/golden/matmul_v1.raw.csv
 # the ingest-vs-ncu harness: both ingests must agree, or ncu-view has a bug

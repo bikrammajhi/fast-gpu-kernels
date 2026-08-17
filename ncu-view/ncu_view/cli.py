@@ -63,9 +63,10 @@ def _print_summary(report: dict) -> None:
     for k in report["kernels"]:
         v = k["verdict"]
         if v:
+            from .terminal import _clean_msg
             color = SEV_COLOR.get(v["severity"], "")
             print(f"{k['name'][:33]:<34}{color}{v['name']}{RESET}")
-            print(f"{'':<34}  {v['message']}")
+            print(f"{'':<34}  {_clean_msg(v['message'])}")
     print()
 
 
