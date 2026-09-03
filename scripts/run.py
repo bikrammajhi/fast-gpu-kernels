@@ -30,7 +30,7 @@ GPU_ARCH = {
     "A100":        ["-arch=sm_80",  "-gencode", "arch=compute_80,code=sm_80"],
     "H100":        ["-arch=sm_90",  "-gencode", "arch=compute_90,code=sm_90"],
     "H200":        ["-arch=sm_90",  "-gencode", "arch=compute_90,code=sm_90"],
-    "B200":        ["-arch=sm_100", "-gencode", "arch=compute_100,code=sm_100"],
+    "B200":        ["-arch=sm_100a", "-gencode", "arch=compute_100a,code=sm_100a", "-gencode", "arch=compute_100a,code=compute_100a"],
     "B100":        ["-arch=sm_100", "-gencode", "arch=compute_100,code=sm_100"],
     "L40S":        ["-arch=sm_89",  "-gencode", "arch=compute_89,code=sm_89"],
     "L4":          ["-arch=sm_89",  "-gencode", "arch=compute_89,code=sm_89"],
@@ -59,7 +59,7 @@ def _compile(src: str, binary: str, gpu: str, extra_flags: list[str], cutlass: b
             f"-I{CUTLASS_ROOT}/examples/common",
         ]
         flags = ["-std=c++17"]
-    cmd = ["nvcc", "-O3", *includes, *arch, "-lcublas", *flags, *extra_flags, "-o", binary, src]
+    cmd = ["nvcc", "-O3", *includes, *arch, "-lcublas", "-lcuda", *flags, *extra_flags, "-o", binary, src]
     console.log(f"[dim]compile[/dim]  {src} [dim]({gpu})[/dim]")
     t0 = time.perf_counter()
     cc = subprocess.run(cmd, capture_output=True, text=True)
@@ -91,7 +91,7 @@ def dispatch(task: str, gpu: str, extra_flags: list[str] | None = None) -> str:
 # ---------------------------------------------------------------------------
 image = (
     modal.Image.from_registry(
-        "nvidia/cuda:13.0.1-cudnn-devel-ubuntu24.04",
+        "nvidia/cuda:12.8.0-cudnn-devel-ubuntu24.04",
         add_python="3.12",
     )
     .apt_install("git")
@@ -105,8 +105,8 @@ image = (
 app = modal.App("gpulab", image=image)
 
 
-@app.function(gpu="H100", timeout=3600)
-def run(task: str, gpu: str = "H100", extra_flags: list[str] | None = None):
+@app.function(gpu="B200", timeout=3600)
+def run(task: str, gpu: str = "B200", extra_flags: list[str] | None = None):
     subprocess.run(["nvidia-smi"], check=True)
     result = dispatch(task, gpu, extra_flags)
     console.print(Panel(result, title=f"[green]{task}[/green] on [bold]{gpu}[/bold]", border_style="green"))
@@ -114,6 +114,6 @@ def run(task: str, gpu: str = "H100", extra_flags: list[str] | None = None):
 
 
 @app.local_entrypoint()
-def main(task: str, gpu: str = "H100", flags: str = ""):
+def main(task: str, gpu: str = "B200", flags: str = ""):
     extra_flags = flags.split() if flags else []
     run.remote(task, gpu, extra_flags)
