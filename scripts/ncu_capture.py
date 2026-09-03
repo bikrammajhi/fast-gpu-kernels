@@ -35,8 +35,8 @@ GPU_ARCH = {
     "A100-80GB": ["-arch=sm_80", "-gencode", "arch=compute_80,code=sm_80"],
     "H100": ["-arch=sm_90", "-gencode", "arch=compute_90,code=sm_90"],
     "H200": ["-arch=sm_90", "-gencode", "arch=compute_90,code=sm_90"],
-    "B200": ["-arch=sm_100", "-gencode", "arch=compute_100,code=sm_100"],
-    "B200+": ["-arch=sm_100", "-gencode", "arch=compute_100,code=sm_100"],
+    "B200": ["-arch=sm_100a", "-gencode", "arch=compute_100a,code=sm_100a", "-gencode", "arch=compute_100a,code=compute_100a"],
+    "B200+": ["-arch=sm_100a", "-gencode", "arch=compute_100a,code=sm_100a", "-gencode", "arch=compute_100a,code=compute_100a"],
     "B100": ["-arch=sm_100", "-gencode", "arch=compute_100,code=sm_100"],
     "L40S": ["-arch=sm_89", "-gencode", "arch=compute_89,code=sm_89"],
     "L4": ["-arch=sm_89", "-gencode", "arch=compute_89,code=sm_89"],
@@ -79,7 +79,7 @@ def _build_run_cmd(src: str, gpu: str) -> list[str]:
                 f"-I{CUTLASS_ROOT}/examples/common",
             ]
         cmd = ["nvcc", "-O3", *includes, *GPU_ARCH.get(gpu, GPU_ARCH["H100"]),
-               "-lcublas", "-std=c++17", "-o", binary, src]
+               "-lcublas", "-lcuda", "-std=c++17", "-o", binary, src]
         subprocess.run(cmd, check=True, capture_output=True, text=True)
         return [binary]
     raise RuntimeError(f"unsupported source: {src} (use --build-cmd)")
@@ -87,15 +87,15 @@ def _build_run_cmd(src: str, gpu: str) -> list[str]:
 
 image = (
     modal.Image.from_registry(
-        "nvidia/cuda:13.0.1-cudnn-devel-ubuntu24.04",
+        "nvidia/cuda:12.8.0-cudnn-devel-ubuntu24.04",
         add_python="3.12",
     )
     .apt_install("git")
-    .apt_install("cuda-nsight-compute-13-0")
+    .apt_install("cuda-nsight-compute-12-8")
     .pip_install("rich")
     .pip_install("ncu-report")
-    .pip_install("torch", index_url="https://download.pytorch.org/whl/cu130")
-    .pip_install("nvidia-cutlass-dsl[cu13]")
+    .pip_install("torch", index_url="https://download.pytorch.org/whl/cu128")
+    .pip_install("nvidia-cutlass-dsl[cu12]")
     .run_commands(
         "git clone --depth 1 https://github.com/NVIDIA/cutlass.git /root/cutlass",
     )
@@ -106,7 +106,7 @@ volume = modal.Volume.from_name("gpulab-cute-dsl-traces", create_if_missing=True
 app = modal.App("gpulab-ncu-capture", image=image)
 
 
-@app.function(gpu="H100", timeout=3600, volumes={"/out": volume})
+@app.function(gpu="B200", timeout=3600, volumes={"/out": volume})
 def capture(
     src: str,
     gpu: str = "H100",
@@ -153,5 +153,14 @@ def main(
     t0 = time.perf_counter()
     key = capture.remote(src, gpu, out, clock_control, launch_skip, launch_count, build_cmd)
     print(f"[{time.perf_counter() - t0:6.1f}s] captured {key}")
-    print(f"download the report only:  modal volume get gpulab-cute-dsl-traces {key} <local-dest>")
-    print(f"open it locally:           ncu-ui <local-dest>/<file>.ncu-rep")
+
+    # Auto-download to NCU folder next to the source file
+    local_dir = PROJECT_ROOT / Path(src).parent / "NCU"
+    local_dir.mkdir(parents=True, exist_ok=True)
+    print(f"downloading to {local_dir} ...")
+    subprocess.run(
+        ["modal", "volume", "get", "gpulab-cute-dsl-traces", key, str(local_dir), "--force"],
+        check=True,
+    )
+    print(f"saved to {local_dir / Path(key).name}")
+    print(f"open locally: ncu-ui {local_dir / Path(key).name}")
