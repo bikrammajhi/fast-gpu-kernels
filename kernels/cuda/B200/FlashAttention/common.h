@@ -209,9 +209,13 @@ void tma_load_v(
 }
 
 // SMEM descriptor builder (for UMMA tcgen05.mma operands)
+// Single function handling both K-major and MN-major canonical no-swizzle layouts.
+// K-major: LBO = height * ATOM_COLS * BF16,  uses height (rows) - Q/K/P [M,K] / [M,N]
+// MN-major: LBO = ATOM_ROWS * width * BF16, uses width (cols) - V [K,N] as MN-major B
 __device__ __forceinline__
-uint64_t make_smem_desc(int smem_addr_bytes, int height) {
-    const int LBO = height * ATOM_COLS * BF16_BYTES;
+uint64_t make_smem_desc(int smem_addr_bytes, int dim, bool mn_major = false) {
+    const int LBO = mn_major ? (ATOM_ROWS * dim * BF16_BYTES)
+                             : (dim * ATOM_COLS * BF16_BYTES);
     const int SBO = ATOM_ROWS * ATOM_COLS * BF16_BYTES;
     return desc_encode(smem_addr_bytes)
          | (uint64_t(desc_encode(LBO)) << 16ULL)
@@ -274,6 +278,17 @@ void tcgen05_st(int taddr, const uint32_t (&in)[8]) {
         :
         : "r"(taddr), "r"(in[0]), "r"(in[1]), "r"(in[2]), "r"(in[3]),
           "r"(in[4]), "r"(in[5]), "r"(in[6]), "r"(in[7])
+        : "memory");
+}
+
+__device__ __forceinline__
+void tcgen05_st(int taddr, const float (&in)[8]) {
+    asm volatile(
+        "tcgen05.st.sync.aligned.32x32b.x8.b32 "
+        "[%0], {%1, %2, %3, %4, %5, %6, %7, %8};\n"
+        :
+        : "r"(taddr), "f"(in[0]), "f"(in[1]), "f"(in[2]), "f"(in[3]),
+          "f"(in[4]), "f"(in[5]), "f"(in[6]), "f"(in[7])
         : "memory");
 }
 

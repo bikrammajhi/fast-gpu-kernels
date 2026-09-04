@@ -26,7 +26,7 @@ constexpr int TMEM_S_COLS  = BLOCK_N;
 constexpr int TMEM_O_COLS  = HEAD_DIM;
 constexpr int Q_TILE_BYTES = BLOCK_M * HEAD_DIM * BF16_BYTES;
 constexpr int K_TILE_BYTES = BLOCK_N * HEAD_DIM * BF16_BYTES;
-constexpr int V_TILE_BYTES = BLOCK_M * BLOCK_N * BF16_BYTES;
+constexpr int V_TILE_BYTES = BLOCK_N * HEAD_DIM * BF16_BYTES;
 
 #include "common.h"
 
@@ -59,9 +59,9 @@ void SM100a_FA_V1(
     const int warp_id = tid / WARP_SIZE;
     const int lane_id = tid % WARP_SIZE;
 
-    const int row_base = warp_id * WARP_SIZE;
-    const int row      = row_base + lane_id;
-    const int tmem_row = row_base << 16;
+    const int row_base = warp_id * WARP_SIZE;       // Each warp processes a contiguous 32-row tile
+    const int row      = row_base + lane_id;        // Each thread processes a single row of the tile
+    const int tmem_row = row_base << 16;            // TMEM row address (upper 16 bits = row, lower 16 bits = col)
 
     // Tile and batch mapping
     const int q_tiles_per_batch = len_q / BLOCK_M;
@@ -121,7 +121,7 @@ void SM100a_FA_V1(
     // Online softmax state
     float rowmax = -FLT_MAX;
     float rowsum = 0.0f;
-    const float softmax_scale = rsqrt(float(HEAD_DIM));
+    const float softmax_scale = rsqrtf(float(HEAD_DIM));
 
     const int kv_tiles = len_kv / BLOCK_N;
 
@@ -180,22 +180,13 @@ void SM100a_FA_V1(
         if (!first_kv) {
             float o8[8];
             for (int n8 = 0; n8 < HEAD_DIM / 8; ++n8) {
-                const int taddr = tmem_addr_o + tmem_row + n8 * 8;
-                tcgen05_ld(taddr, o8);
+                const int tmem_addr = tmem_addr_o + tmem_row + n8 * 8;
+                tcgen05_ld(tmem_addr, o8);
 
                 for (int i = 0; i < 8; ++i)
                     o8[i] *= rescale;
 
-                uint32_t o8_u32[8];
-                for (int i = 0; i < 4; ++i) {
-                    nv_bfloat16 lo = __float2bfloat16_rn(o8[2 * i]);
-                    nv_bfloat16 hi = __float2bfloat16_rn(o8[2 * i + 1]);
-                    unsigned short p[2] = {
-                        *reinterpret_cast<unsigned short*>(&lo),
-                        *reinterpret_cast<unsigned short*>(&hi)};
-                    o8_u32[i] = (unsigned int)p[0] | ((unsigned int)p[1] << 16);
-                }
-                tcgen05_st(taddr, o8_u32);
+                tcgen05_st(tmem_addr, o8);
             }
             tcgen05_wait_st();
         }
@@ -231,10 +222,10 @@ void SM100a_FA_V1(
         if (warp_id == 0 && elect_sync()) {
             constexpr uint64_t a_step = (BLOCK_M  * MMA_K_BYTES) / 16;
             constexpr uint64_t b_step = (HEAD_DIM * MMA_K_BYTES) / 16;
-            uint64_t a_desc = make_smem_desc(K_smem, BLOCK_M);
-            uint64_t b_desc = make_smem_desc(V_smem, HEAD_DIM);
+            uint64_t a_desc = make_smem_desc(K_smem, BLOCK_M, false); // K-major P
+            uint64_t b_desc = make_smem_desc(V_smem, HEAD_DIM, true); // MN-major V
 
-            for (int k = 0; k < BLOCK_M / MMA_K; ++k) {
+            for (int k = 0; k < BLOCK_N / MMA_K; ++k) {
                 const int enable = (first_kv && k == 0) ? 0 : 1;
                 tcgen05_mma_f16(tmem_addr_o, a_desc, b_desc, idesc_PV, enable);
                 a_desc += a_step;
